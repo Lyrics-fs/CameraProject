@@ -3,844 +3,564 @@ package com.example.camera;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Shader;
 import android.graphics.SurfaceTexture;
-import android.hardware.camera2.*;
-import android.hardware.camera2.params.StreamConfigurationMap;
-import android.media.Image;
-import android.media.ImageReader;
+import android.opengl.GLSurfaceView;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.util.DisplayMetrics;
+import android.os.Environment;
 import android.util.Log;
-import android.util.Range;
-import android.util.Size;
-import android.util.SparseIntArray;
-import android.view.Surface;
-import android.view.TextureView;
-import android.view.View;
-import android.widget.*;
+import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.SeekBar;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.camera.camera2.interop.Camera2CameraControl;
+import androidx.camera.camera2.interop.CaptureRequestOptions;
+import androidx.camera.core.Camera;
+import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageCapture;
+import androidx.camera.core.ImageCaptureException;
+import androidx.camera.core.ImageProxy;
+import androidx.camera.core.Preview;
+import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.exifinterface.media.ExifInterface;
 
-import com.example.camera.contract.CameraContract;
-import com.example.camera.presenter.CameraPresenter;
+import android.hardware.camera2.CaptureRequest;
 
+import com.google.common.util.concurrent.ListenableFuture;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
-/**
- * 主Activity - 实现View接口
- * 负责UI展示和用户交互，业务逻辑委托给Presenter处理
- * 经过MVP架构重构，分离了业务逻辑和UI逻辑
- */
-public class MainActivity extends AppCompatActivity implements CameraContract.View {
-    private static final String TAG = "MainActivity";
-    
-    // UI组件
-    private TextureView textureView;
+public class MainActivity extends AppCompatActivity {
+
+    private static final String TAG = "CameraXGL";
+    private static final int REQUEST_CAMERA_PERMISSION = 1;
+
+    // UI 组件
+    private GLSurfaceView glSurfaceView;
     private Button captureButton;
     private ImageView imageView;
-    private TextView tvBrightnessValue, tvExposureValue, tvIsoValue;
-    private TextView tvBrightnessLabel, tvCameraStatus, tvPhotoCount;
+    private TextView tvBrightnessValue;
     private SeekBar seekBarBrightness, seekBarIso, seekBarExposure;
-    private ProgressBar progressBar;
-    
-    // MVP架构
-    private CameraContract.Presenter presenter;
-    
-    // 相机相关变量（保留必要的Camera2 API操作）
-    private String cameraId = "0";
-    private CameraDevice cameraDevice;
-    private CameraCaptureSession cameraCaptureSession;
-    private CaptureRequest.Builder previewRequestBuilder;
-    private ImageReader imageReader;
-    private Size previewSize;
-    private CameraManager cameraManager;
-    private Range<Integer> isoRange;
-    private Range<Long> exposureRange;
-    private int sensorOrientation;
-    private float aperture = 1.0f;
-    
-    // 屏幕旋转方向映射表
-    private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
-    static {
-        ORIENTATIONS.append(Surface.ROTATION_0, 90);
-        ORIENTATIONS.append(Surface.ROTATION_90, 0);
-        ORIENTATIONS.append(Surface.ROTATION_180, 270);
-        ORIENTATIONS.append(Surface.ROTATION_270, 180);
-    }
+
+    // OpenGL ES 渲染器
+    private CameraRenderer cameraRenderer;
+
+    // CameraX 组件
+    private ProcessCameraProvider cameraProvider;
+    private Camera camera;
+    private ImageCapture imageCapture;
+    private Preview preview;
+
+    // 相机参数（通过 Camera2 Interop 手动控制）
+    private android.util.Range<Integer> isoRange;
+    private android.util.Range<Long> exposureRange;
+    private float aperture = 1.8f;
+
+    // 当前手动参数值
+    private int currentIso = -1;
+    private long currentExposure = -1;
+
+    private final Executor captureExecutor = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        
-        initViews();
-        cameraManager = (CameraManager) getSystemService(CAMERA_SERVICE);
-        
-        // 初始化MVP架构
-        presenter = new CameraPresenter(this, this);
-        presenter.onViewCreated();
-        
-        setupListeners();
-    }
-    
-    private void initViews() {
-        textureView = findViewById(R.id.tv);
-        captureButton = findViewById(R.id.btn);
-        imageView = findViewById(R.id.iv);
+
+        glSurfaceView    = findViewById(R.id.gl_surface_view);
+        captureButton    = findViewById(R.id.btn);
+        imageView        = findViewById(R.id.iv);
         tvBrightnessValue = findViewById(R.id.tv_display_value);
-        tvExposureValue = findViewById(R.id.tv_exposure_value);
-        tvIsoValue = findViewById(R.id.tv_iso_value);
-        tvBrightnessLabel = findViewById(R.id.tv_brightness_value);
-        tvCameraStatus = findViewById(R.id.tv_camera_status);
-        tvPhotoCount = findViewById(R.id.tv_photo_count);
-        progressBar = findViewById(R.id.progressBar);
-        
         seekBarBrightness = findViewById(R.id.seekBarBrightness);
-        seekBarIso = findViewById(R.id.seekBarIso);
-        seekBarExposure = findViewById(R.id.seekBarExposure);
-    }
-    
-    private void setupListeners() {
-        seekBarIso.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && presenter != null) {
-                    presenter.onIsoChanged(progress);
-                }
-            }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        
-        seekBarExposure.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && presenter != null) {
-                    presenter.onExposureChanged(progress);
-                }
-            }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        
-        seekBarBrightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && presenter != null) {
-                    presenter.onBrightnessChanged(progress);
-                }
-            }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        
+        seekBarIso        = findViewById(R.id.seekBarIso);
+        seekBarExposure   = findViewById(R.id.seekBarExposure);
+
+        setupGLSurfaceView();
+        setupSeekBars();
         captureButton.setOnClickListener(v -> takePicture());
-        textureView.setSurfaceTextureListener(surfaceTextureListener);
+
+        // 在布局完成后根据宽度设置预览高度 = 宽度 × 4/3（竖屏相机比例）
+        glSurfaceView.getViewTreeObserver().addOnGlobalLayoutListener(new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                glSurfaceView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                int w = glSurfaceView.getWidth();
+                if (w > 0) {
+                    android.view.ViewGroup.LayoutParams lp = glSurfaceView.getLayoutParams();
+                    lp.height = w * 4 / 3;
+                    glSurfaceView.setLayoutParams(lp);
+                }
+            }
+        });
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED) {
+            startCamera();
+        } else {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
+        }
     }
 
-    // =============================================================================
-    // View接口实现
-    // =============================================================================
-    
-    @Override
-    public void showLoading(boolean show) {
-        runOnUiThread(() -> {
-            if (progressBar != null) {
-                progressBar.setVisibility(show ? View.VISIBLE : View.GONE);
-            }
+    // -------------------------------------------------------------------------
+    // OpenGL ES 初始化
+    // -------------------------------------------------------------------------
+
+    private void setupGLSurfaceView() {
+        glSurfaceView.setEGLContextClientVersion(2);
+        glSurfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0);
+        glSurfaceView.getHolder().setFormat(android.graphics.PixelFormat.RGBA_8888);
+
+        cameraRenderer = new CameraRenderer();
+        cameraRenderer.setOnSurfaceTextureAvailableListener(surfaceTexture -> {
+            // GL 线程回调：SurfaceTexture 就绪后绑定到 CameraX Preview
+            runOnUiThread(() -> bindCameraPreview(surfaceTexture));
         });
-    }
-    
-    @Override
-    public void updateCameraStatus(String status) {
-        runOnUiThread(() -> {
-            if (tvCameraStatus != null) {
-                tvCameraStatus.setText(status);
-            }
-        });
-    }
-    
-    @Override
-    public void updatePhotoCount(int count) {
-        runOnUiThread(() -> {
-            if (tvPhotoCount != null) {
-                tvPhotoCount.setText(String.format("已拍摄: %d 张", count));
-            }
-        });
-    }
-    
-    @Override
-    public void showError(String error) {
-        runOnUiThread(() -> {
-            new AlertDialog.Builder(this)
-                .setTitle("错误")
-                .setMessage(error)
-                .setPositiveButton("确定", null)
-                .show();
-        });
-    }
-    
-    @Override
-    public void showToast(String message) {
-        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
-    }
-    
-    @Override
-    public void updateIsoDisplay(int iso) {
-        runOnUiThread(() -> {
-            if (tvIsoValue != null) {
-                tvIsoValue.setText(String.valueOf(iso));
-            }
-        });
-    }
-    
-    @Override
-    public void updateExposureDisplay(String exposureText) {
-        runOnUiThread(() -> {
-            if (tvExposureValue != null) {
-                tvExposureValue.setText(exposureText);
-            }
-        });
-    }
-    
-    @Override
-    public void updateBrightnessMode(String mode) {
-        runOnUiThread(() -> {
-            if (tvBrightnessLabel != null) {
-                tvBrightnessLabel.setText(mode);
-            }
-        });
-    }
-    
-    @Override
-    public void updateExposureValue(String exposureValue) {
-        runOnUiThread(() -> {
-            if (tvBrightnessValue != null) {
-                tvBrightnessValue.setText(exposureValue);
-                tvBrightnessValue.setTextColor(getResources().getColor(R.color.status_text));
-            }
-        });
-    }
-    
-    @Override
-    public void resetSeekBars() {
-        runOnUiThread(() -> {
-            seekBarIso.setProgress(0);
-            seekBarExposure.setProgress(0);
-            seekBarBrightness.setProgress(0);
-        });
-    }
-    
-    @Override
-    public void setSeekBarProgress(int seekBarId, int progress) {
-        runOnUiThread(() -> {
-            SeekBar seekBar = findViewById(seekBarId);
-            if (seekBar != null) {
-                seekBar.setProgress(progress);
-            }
-        });
-    }
-    
-    @Override
-    public void displayCapturedImage(Bitmap bitmap) {
-        runOnUiThread(() -> {
-            if (imageView != null && bitmap != null) {
-                imageView.setImageBitmap(bitmap);
-            }
-        });
-    }
-    
-    @Override
-    public int getIsoProgress() {
-        return seekBarIso != null ? seekBarIso.getProgress() : 0;
-    }
-    
-    @Override
-    public int getExposureProgress() {
-        return seekBarExposure != null ? seekBarExposure.getProgress() : 0;
-    }
-    
-    @Override
-    public int getBrightnessProgress() {
-        return seekBarBrightness != null ? seekBarBrightness.getProgress() : 0;
-    }
-    
-    @Override
-    public void applyCameraIsoParameter(int iso) {
-        updateIsoParameter(iso);
-    }
-    
-    @Override
-    public void applyCameraExposureParameter(long exposure) {
-        updateExposureParameter(exposure);
+
+        glSurfaceView.setRenderer(cameraRenderer);
+        glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
     }
 
-    // =============================================================================
-    // Activity生命周期和权限处理
-    // =============================================================================
-    
+    // -------------------------------------------------------------------------
+    // CameraX 启动与绑定
+    // -------------------------------------------------------------------------
+
+    private void startCamera() {
+        ListenableFuture<ProcessCameraProvider> future =
+                ProcessCameraProvider.getInstance(this);
+        future.addListener(() -> {
+            try {
+                cameraProvider = future.get();
+                // 如果 GL SurfaceTexture 已就绪则立即绑定，否则等待渲染器回调
+                SurfaceTexture st = cameraRenderer.getSurfaceTexture();
+                if (st != null) {
+                    bindCameraPreview(st);
+                }
+            } catch (ExecutionException | InterruptedException e) {
+                Log.e(TAG, "CameraProvider init failed", e);
+            }
+        }, ContextCompat.getMainExecutor(this));
+    }
+
+    private void bindCameraPreview(SurfaceTexture surfaceTexture) {
+        if (cameraProvider == null) return;
+
+        cameraProvider.unbindAll();
+
+        // 将 GL SurfaceTexture 包装为 CameraX Preview.SurfaceProvider
+        surfaceTexture.setDefaultBufferSize(1280, 720);
+        android.view.Surface glSurface = new android.view.Surface(surfaceTexture);
+
+        Preview.SurfaceProvider surfaceProvider = request -> {
+            android.util.Size resolution = request.getResolution();
+            surfaceTexture.setDefaultBufferSize(resolution.getWidth(), resolution.getHeight());
+            request.provideSurface(glSurface,
+                    ContextCompat.getMainExecutor(this), result -> {});
+            // 通知渲染器相机实际分辨率，用于宽高比校正
+            // 后置相机传感器为横向，竖屏时宽高需交换
+            glSurfaceView.queueEvent(() ->
+                    cameraRenderer.setCameraAspect(resolution.getHeight(), resolution.getWidth()));
+        };
+
+        preview = new Preview.Builder().build();
+        preview.setSurfaceProvider(surfaceProvider);
+
+        imageCapture = new ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .build();
+
+        CameraSelector selector = CameraSelector.DEFAULT_BACK_CAMERA;
+
+        camera = cameraProvider.bindToLifecycle(this, selector, preview, imageCapture);
+
+        // 读取相机参数范围（通过 Camera2 Interop）
+        readCameraRanges();
+    }
+
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    private void readCameraRanges() {
+        if (camera == null) return;
+        try {
+            androidx.camera.camera2.interop.Camera2CameraInfo info =
+                    androidx.camera.camera2.interop.Camera2CameraInfo.from(camera.getCameraInfo());
+            isoRange = info.getCameraCharacteristic(
+                    android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+            exposureRange = info.getCameraCharacteristic(
+                    android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+            float[] apertures = info.getCameraCharacteristic(
+                    android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES);
+            if (apertures != null && apertures.length > 0) aperture = apertures[0];
+
+            // 初始化默认值
+            if (isoRange != null) currentIso = isoRange.getLower();
+            if (exposureRange != null) currentExposure = exposureRange.getLower();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to read camera ranges", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // SeekBar 监听
+    // -------------------------------------------------------------------------
+
+    private void setupSeekBars() {
+        seekBarIso.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean f) { updateIso(p); }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        seekBarExposure.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean f) { updateExposure(p); }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+        seekBarBrightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean f) { updateBrightness(p); }
+            @Override public void onStartTrackingTouch(SeekBar s) {}
+            @Override public void onStopTrackingTouch(SeekBar s) {}
+        });
+    }
+
+    @androidx.camera.camera2.interop.ExperimentalCamera2Interop
+    private void applyCamera2Options() {
+        if (camera == null) return;
+        try {
+            CaptureRequestOptions.Builder builder = new CaptureRequestOptions.Builder()
+                    .setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE,
+                            CaptureRequest.CONTROL_AE_MODE_OFF);
+            if (currentIso > 0)
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, currentIso);
+            if (currentExposure > 0)
+                builder.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, currentExposure);
+
+            Camera2CameraControl.from(camera.getCameraControl())
+                    .setCaptureRequestOptions(builder.build());
+        } catch (Exception e) {
+            Log.e(TAG, "applyCamera2Options failed", e);
+        }
+    }
+
+    private void updateIso(int progress) {
+        if (isoRange == null) return;
+        currentIso = isoRange.getLower() +
+                (int) ((isoRange.getUpper() - isoRange.getLower()) * (progress / 5000f));
+        seekBarBrightness.setProgress(0);
+        applyCamera2Options();
+        updateBrightnessDisplay();
+        Log.d(TAG, "ISO=" + currentIso);
+    }
+
+    private void updateExposure(int progress) {
+        if (exposureRange == null) return;
+        currentExposure = exposureRange.getLower() +
+                (long) ((exposureRange.getUpper() - exposureRange.getLower()) * (progress / 5000f));
+        seekBarBrightness.setProgress(0);
+        applyCamera2Options();
+        updateBrightnessDisplay();
+        Log.d(TAG, "Exposure=" + currentExposure + " ns");
+    }
+
+    private void updateBrightness(int progress) {
+        // 亮度滑条：同时调整 ISO + 曝光，并更新 GL 亮度增益
+        if (isoRange != null && exposureRange != null) {
+            currentIso = isoRange.getLower() +
+                    (int) ((isoRange.getUpper() - isoRange.getLower()) * (progress / 5000f));
+            currentExposure = exposureRange.getLower() +
+                    (long) ((exposureRange.getUpper() - exposureRange.getLower()) * (progress / 5000f));
+            runOnUiThread(() -> {
+                seekBarIso.setProgress(0);
+                seekBarExposure.setProgress(0);
+            });
+            applyCamera2Options();
+        }
+        // GL 亮度增益：0→0.5x，5000→2.0x
+        float glBrightness = 0.5f + (progress / 5000f) * 1.5f;
+        cameraRenderer.setBrightness(glBrightness);
+        updateBrightnessDisplay1(progress);
+    }
+
+    private void updateBrightnessDisplay() {
+        if (isoRange == null || exposureRange == null) return;
+        int expProg = seekBarExposure.getProgress();
+        int isoProg = seekBarIso.getProgress();
+        long exp = exposureRange.getLower() +
+                (long) ((exposureRange.getUpper() - exposureRange.getLower()) * (expProg / 5000f));
+        int iso = isoRange.getLower() +
+                (int) ((isoRange.getUpper() - isoRange.getLower()) * (isoProg / 5000f));
+        double E = iso * (exp / 1_000_000_000.0);
+        runOnUiThread(() -> {
+            tvBrightnessValue.setText(String.format("E: %.2f", E));
+            tvBrightnessValue.setTextColor(Color.GREEN);
+        });
+    }
+
+    private void updateBrightnessDisplay1(int progress) {
+        if (isoRange == null || exposureRange == null) return;
+        long exp = exposureRange.getLower() +
+                (long) ((exposureRange.getUpper() - exposureRange.getLower()) * (progress / 5000f));
+        int iso = isoRange.getLower() +
+                (int) ((isoRange.getUpper() - isoRange.getLower()) * (progress / 5000f));
+        double E = iso * (exp / 1_000_000_000.0);
+        runOnUiThread(() -> {
+            tvBrightnessValue.setText(String.format("E: %.2f", E));
+            tvBrightnessValue.setTextColor(Color.GREEN);
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // 拍照
+    // -------------------------------------------------------------------------
+
+    private void takePicture() {
+        if (imageCapture == null) return;
+        imageCapture.takePicture(captureExecutor, new ImageCapture.OnImageCapturedCallback() {
+            @Override
+            public void onCaptureSuccess(@NonNull ImageProxy imageProxy) {
+                processCapture(imageProxy);
+                imageProxy.close();
+            }
+
+            @Override
+            public void onError(@NonNull ImageCaptureException exception) {
+                Log.e(TAG, "Capture failed", exception);
+                runOnUiThread(() ->
+                        Toast.makeText(MainActivity.this, "拍照失败", Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    private void processCapture(ImageProxy imageProxy) {
+        // 从 ImageProxy 获取 JPEG 字节
+        ImageProxy.PlaneProxy plane = imageProxy.getPlanes()[0];
+        ByteBuffer buffer = plane.getBuffer();
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+
+        android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+        Bitmap originalBitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length, opts);
+        if (originalBitmap == null) return;
+
+        // 保存原始 JPEG
+        File dcimDir = new File(Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DCIM), "Camera");
+        if (!dcimDir.exists()) dcimDir.mkdirs();
+
+        File originalFile = new File(dcimDir, System.currentTimeMillis() + "_original.jpg");
+        try (FileOutputStream fos = new FileOutputStream(originalFile)) {
+            fos.write(bytes);
+        } catch (IOException e) {
+            Log.e(TAG, "保存原始图像失败", e);
+        }
+
+        // 读取 EXIF 亮度
+        String exifBrightness = "N/A";
+        try {
+            ExifInterface exif = new ExifInterface(originalFile.getAbsolutePath());
+            String val = exif.getAttribute(ExifInterface.TAG_BRIGHTNESS_VALUE);
+            if (val != null) exifBrightness = val;
+        } catch (IOException e) {
+            exifBrightness = "读取失败";
+        }
+
+        // 生成伪彩色图像并显示
+        Bitmap pseudoBitmap = createPseudoColorImage(originalBitmap, exifBrightness);
+        runOnUiThread(() -> imageView.setImageBitmap(pseudoBitmap));
+
+        // 保存伪彩色图像
+        File pseudoFile = new File(dcimDir, System.currentTimeMillis() + "_pseudo.jpg");
+        try (FileOutputStream fos = new FileOutputStream(pseudoFile)) {
+            pseudoBitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos);
+            runOnUiThread(() -> Toast.makeText(this,
+                    "已保存: " + pseudoFile.getName(), Toast.LENGTH_SHORT).show());
+        } catch (IOException e) {
+            Log.e(TAG, "保存伪彩色图像失败", e);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 伪彩色图像生成（CPU 端，用于拍照结果展示）
+    // -------------------------------------------------------------------------
+
+    private Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness) {
+        int width = originalBitmap.getWidth();
+        int height = originalBitmap.getHeight();
+
+        int[] pixels = new int[width * height];
+        originalBitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+
+        for (int i = 0; i < pixels.length; i++) {
+            int gray = Color.red(pixels[i]);
+            int color;
+            if (gray < 64) {
+                color = Color.rgb(0, 0, gray * 4);
+            } else if (gray < 128) {
+                int blue = 255 - (gray - 64) * 4;
+                int green = (gray - 64) * 4;
+                color = Color.rgb(0, green, blue);
+            } else if (gray < 192) {
+                int green = 255 - (gray - 128) * 4;
+                int red = (gray - 128) * 4;
+                color = Color.rgb(red, green, 0);
+            } else {
+                int green = (gray - 192) * 4;
+                color = Color.rgb(255, green, 0);
+            }
+            pixels[i] = color;
+        }
+
+        Bitmap pseudoBitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
+
+        // 旋转 90°
+        Matrix rotateMatrix = new Matrix();
+        rotateMatrix.postRotate(90);
+        Bitmap rotated = Bitmap.createBitmap(pseudoBitmap, 0, 0, width, height, rotateMatrix, true);
+        pseudoBitmap.recycle();
+        int rw = rotated.getWidth();
+        int rh = rotated.getHeight();
+
+        // 计算平均亮度
+        int[][] samplePoints = {
+                {width / 4, height / 4}, {width * 3 / 4, height / 4},
+                {width / 4, height * 3 / 4}, {width * 3 / 4, height * 3 / 4},
+                {width / 2, height / 2}
+        };
+        int sumR = 0, sumG = 0, sumB = 0;
+        for (int[] pt : samplePoints) {
+            int px = originalBitmap.getPixel(pt[0], pt[1]);
+            sumR += Color.red(px);
+            sumG += Color.green(px);
+            sumB += Color.blue(px);
+        }
+        int n = samplePoints.length;
+        int avgR = sumR / n, avgG = sumG / n, avgB = sumB / n;
+        double yValue = 0.299 * avgR + 0.587 * avgG + 0.114 * avgB;
+
+        // 解析 EXIF BV
+        float bv = Float.NaN;
+        if (exifBrightness != null && !exifBrightness.equals("N/A") && !exifBrightness.equals("读取失败")) {
+            try {
+                if (exifBrightness.contains("/")) {
+                    String[] parts = exifBrightness.split("/");
+                    bv = Float.parseFloat(parts[0]) / Float.parseFloat(parts[1]);
+                } else {
+                    bv = Float.parseFloat(exifBrightness);
+                }
+            } catch (Exception ignored) {}
+        }
+
+        double Lcenter = Float.isNaN(bv)
+                ? yValue / 255.0 * 400 + 50
+                : 2.9 * Math.exp(0.729 * bv);
+
+        // 图例
+        final int legendLevels = 4;
+        double delta = Lcenter * 0.25;
+        double[] lThresholds = new double[legendLevels + 1];
+        for (int i = 0; i <= legendLevels; i++)
+            lThresholds[i] = Lcenter - delta + (2 * delta) * i / legendLevels;
+
+        int[][] colorPairs = {
+                {Color.rgb(0, 0, 0),   Color.rgb(0, 0, 255)},
+                {Color.rgb(0, 0, 255), Color.rgb(0, 255, 0)},
+                {Color.rgb(0, 255, 0), Color.rgb(255, 255, 0)},
+                {Color.rgb(255, 255, 0), Color.rgb(255, 0, 0)}
+        };
+
+        final int legendWidth = 190;
+        Bitmap finalBitmap = Bitmap.createBitmap(rw + legendWidth, rh, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(finalBitmap);
+        canvas.drawBitmap(rotated, 0, 0, null);
+        rotated.recycle();
+
+        Paint paint = new Paint();
+        paint.setAntiAlias(true);
+        paint.setColor(Color.BLACK);
+        paint.setTextSize(32);
+        canvas.drawText("亮度L (cd/m²)", rw + 18, 48, paint);
+
+        int itemHeight = Math.max(rh / legendLevels, 50);
+        paint.setTextSize(40);
+        for (int i = 0; i < legendLevels; i++) {
+            int y = i * itemHeight;
+            LinearGradient gradient = new LinearGradient(
+                    rw + 15, y + 10, rw + legendWidth - 15, y + itemHeight - 10,
+                    new int[]{colorPairs[i][0], colorPairs[i][1]}, null, Shader.TileMode.CLAMP);
+            paint.setShader(gradient);
+            canvas.drawRect(rw + 10, y + 10, rw + legendWidth - 10, y + itemHeight - 10, paint);
+            paint.setShader(null);
+
+            String lLabel = String.format("L\n%.2f\n↓\n%.2f", lThresholds[i], lThresholds[i + 1]);
+            paint.setColor(Color.BLACK);
+            paint.setTextSize(40);
+            float lineH = paint.getTextSize() + 8;
+            String[] lines = lLabel.split("\n");
+            float totalH = lines.length * lineH;
+            float textY = y + (itemHeight - totalH) / 2f + lineH;
+            float textX = rw + legendWidth / 2f - paint.measureText("00.00") / 2f;
+            for (int j = 0; j < lines.length; j++)
+                canvas.drawText(lines[j], textX, textY + j * lineH, paint);
+        }
+
+        Paint textPaint = new Paint();
+        textPaint.setColor(Color.WHITE);
+        textPaint.setTextSize(36);
+        textPaint.setAntiAlias(true);
+        textPaint.setShadowLayer(2.0f, 2, 2, Color.BLACK);
+        canvas.drawText(String.format("Avg RGB: R=%d, G=%d, B=%d", avgR, avgG, avgB), 30, 60, textPaint);
+        canvas.drawText(String.format("Gray = %.2f", yValue), 30, 110, textPaint);
+        canvas.drawText(String.format("EXIF BV = %s", exifBrightness), 30, 170, textPaint);
+        String lResult = Float.isNaN(bv) ? "L = N/A"
+                : String.format("L = 2.9 × exp(0.729×BV) = %.2f", 2.9 * Math.exp(0.729 * bv));
+        canvas.drawText(lResult, 30, 220, textPaint);
+
+        return finalBitmap;
+    }
+
+    // -------------------------------------------------------------------------
+    // 生命周期
+    // -------------------------------------------------------------------------
+
     @Override
     protected void onResume() {
         super.onResume();
-        if (presenter != null) {
-            presenter.onResume();
-        }
-        
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            if (textureView.isAvailable()) {
-                openCamera();
-            } else {
-                textureView.setSurfaceTextureListener(surfaceTextureListener);
-            }
-        } else {
-            requestPermissions();
-        }
-    }
-    
-    @Override
-    protected void onPause() {
-        if (presenter != null) {
-            presenter.onPause();
-        }
-        closeCamera();
-        super.onPause();
-    }
-    
-    @Override
-    protected void onDestroy() {
-        if (presenter != null) {
-            presenter.onDestroy();
-        }
-        super.onDestroy();
-    }
-    
-    private void requestPermissions() {
-        List<String> permissions = new ArrayList<>();
-        
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.CAMERA);
-        }
-        
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-        }
-        
-        if (!permissions.isEmpty()) {
-            ActivityCompat.requestPermissions(this, permissions.toArray(new String[0]), 1001);
-        }
-    }
-    
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        
-        if (requestCode == 1001) {
-            boolean allGranted = true;
-            for (int result : grantResults) {
-                if (result != PackageManager.PERMISSION_GRANTED) {
-                    allGranted = false;
-                    break;
-                }
-            }
-            
-            if (allGranted && presenter != null) {
-                presenter.onPermissionGranted();
-            } else if (presenter != null) {
-                presenter.onPermissionDenied();
-            }
-        }
+        glSurfaceView.onResume();
     }
 
-    // =============================================================================
-    // 相机操作方法（简化版，与Presenter协作）
-    // =============================================================================
-    
-    // TextureView表面纹理状态监听器实现
-    private final TextureView.SurfaceTextureListener surfaceTextureListener = new TextureView.SurfaceTextureListener() {
-        @Override
-        public void onSurfaceTextureAvailable(@NonNull SurfaceTexture surface, int width, int height) {
-            openCamera();
-        }
-        @Override
-        public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture surface, int width, int height) {}
-        @Override
-        public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture surface) {
-            return true;
-        }
-        @Override
-        public void onSurfaceTextureUpdated(@NonNull SurfaceTexture surface) {}
-    };
-    
-    /**
-     * 打开相机（委托给Presenter处理业务逻辑）
-     */
-    private void openCamera() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions();
-            return;
-        }
-        
-        if (presenter != null) {
-            presenter.initializeCamera();
-        }
-        
-        // 这里保留原有的Camera2 API操作
-        try {
-            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
-            StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-            sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-            isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
-            exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
-            
-            float[] availableApertures = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES);
-            if (availableApertures != null && availableApertures.length > 0) {
-                aperture = availableApertures[0];
-            }
-            
-            Size largestJpegSize = Collections.max(
-                    Arrays.asList(map.getOutputSizes(android.graphics.ImageFormat.JPEG)),
-                    new CompareSizesByArea()
-            );
-            
-            // 修复预览尺寸选择问题
-            Size[] previewSizes = map.getOutputSizes(SurfaceTexture.class);
-            int viewWidth = textureView.getWidth();
-            int viewHeight = textureView.getHeight();
-            
-            // 如果TextureView尺寸为0，使用屏幕尺寸
-            if (viewWidth == 0 || viewHeight == 0) {
-                android.util.DisplayMetrics displayMetrics = new android.util.DisplayMetrics();
-                getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-                viewWidth = displayMetrics.widthPixels;
-                viewHeight = displayMetrics.heightPixels;
-            }
-            
-            previewSize = chooseOptimalSize(
-                    previewSizes,
-                    viewWidth,
-                    viewHeight,
-                    largestJpegSize
-            );
-            
-            Log.d(TAG, "Selected preview size: " + previewSize.getWidth() + "x" + previewSize.getHeight());
-            Log.d(TAG, "TextureView size: " + viewWidth + "x" + viewHeight);
-            
-            // 调整TextureView以匹配相机预览的宽高比，避免拉伸
-            adjustTextureViewAspectRatio(previewSize, viewWidth, viewHeight);
-            
-            imageReader = ImageReader.newInstance(
-                    largestJpegSize.getWidth(),
-                    largestJpegSize.getHeight(),
-                    android.graphics.ImageFormat.JPEG,
-                    2
-            );
-            imageReader.setOnImageAvailableListener(
-                    imageAvailableListener,
-                    new Handler(Looper.getMainLooper())
-            );
-            
-            cameraManager.openCamera(cameraId, stateCallback, null);
-            
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Camera access exception", e);
-            if (presenter != null) {
-                presenter.onCameraError(CameraDevice.StateCallback.ERROR_CAMERA_DEVICE);
-            }
-        }
+    @Override
+    protected void onPause() {
+        super.onPause();
+        glSurfaceView.onPause();
     }
-    
-    // 相机设备状态回调
-    private final CameraDevice.StateCallback stateCallback = new CameraDevice.StateCallback() {
-        @Override
-        public void onOpened(@NonNull CameraDevice camera) {
-            cameraDevice = camera;
-            startPreview();
-            if (presenter != null) {
-                presenter.onCameraOpened();
-            }
-        }
-        
-        @Override
-        public void onDisconnected(@NonNull CameraDevice camera) {
-            closeCamera();
-            if (presenter != null) {
-                presenter.onCameraDisconnected();
-            }
-        }
-        
-        @Override
-        public void onError(@NonNull CameraDevice camera, int error) {
-            closeCamera();
-            if (presenter != null) {
-                presenter.onCameraError(error);
-            }
-        }
-    };
-    
-    /**
-     * 启动预览
-     */
-    private void startPreview() {
-        try {
-            SurfaceTexture texture = textureView.getSurfaceTexture();
-            if (texture == null) {
-                Log.e(TAG, "SurfaceTexture is null");
-                return;
-            }
-            
-            // 设置缓冲区尺寸
-            texture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-            Surface previewSurface = new Surface(texture);
-            
-            Log.d(TAG, "Creating preview surface with size: " + previewSize.getWidth() + "x" + previewSize.getHeight());
-            
-            previewRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            previewRequestBuilder.addTarget(previewSurface);
-            
-            // 修复相机参数设置 - 先使用自动模式确保预览正常
-            previewRequestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
-            // 先使用自动曝光，等预览正常后再切换到手动模式
-            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-            
-            cameraDevice.createCaptureSession(
-                    Arrays.asList(previewSurface, imageReader.getSurface()),
-                    new CameraCaptureSession.StateCallback() {
-                        @Override
-                        public void onConfigured(@NonNull CameraCaptureSession session) {
-                            Log.d(TAG, "Camera capture session configured successfully");
-                            cameraCaptureSession = session;
-                            updatePreview();
-                        }
-                        
-                        @Override
-                        public void onConfigureFailed(@NonNull CameraCaptureSession session) {
-                            Log.e(TAG, "Camera capture session configuration failed");
-                            showError("相机预览配置失败");
-                        }
-                    },
-                    null
-            );
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Failed to start preview", e);
-            showError("启动预览失败: " + e.getMessage());
-        } catch (Exception e) {
-            Log.e(TAG, "Unexpected error starting preview", e);
-            showError("预览启动发生错误: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * 更新预览
-     */
-    private void updatePreview() {
-        if (cameraDevice == null) {
-            Log.w(TAG, "Camera device is null, cannot update preview");
-            return;
-        }
-        
-        if (previewRequestBuilder == null) {
-            Log.w(TAG, "Preview request builder is null, cannot update preview");
-            return;
-        }
-        
-        if (cameraCaptureSession == null) {
-            Log.w(TAG, "Camera capture session is null, cannot update preview");
-            return;
-        }
-        
-        try {
-            Log.d(TAG, "Starting repeating preview request");
-            cameraCaptureSession.setRepeatingRequest(
-                    previewRequestBuilder.build(),
-                    new CameraCaptureSession.CaptureCallback() {
-                        @Override
-                        public void onCaptureStarted(@NonNull CameraCaptureSession session, 
-                                                    @NonNull CaptureRequest request, 
-                                                    long timestamp, 
-                                                    long frameNumber) {
-                            Log.d(TAG, "Preview capture started, frame: " + frameNumber);
-                        }
-                        
-                        @Override
-                        public void onCaptureCompleted(@NonNull CameraCaptureSession session,
-                                                      @NonNull CaptureRequest request,
-                                                      @NonNull TotalCaptureResult result) {
-                            // 预览正常运行后，可以切换到手动模式
-                            // Log.d(TAG, "Preview capture completed");
-                        }
-                        
-                        @Override
-                        public void onCaptureFailed(@NonNull CameraCaptureSession session,
-                                                   @NonNull CaptureRequest request,
-                                                   @NonNull CaptureFailure failure) {
-                            Log.e(TAG, "Preview capture failed: " + failure.getReason());
-                        }
-                    },
-                    null
-            );
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Failed to update preview", e);
-            showError("更新预览失败: " + e.getMessage());
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "Camera session is closed", e);
-            showError("相机会话已关闭");
-        }
-    }
-    
-    /**
-     * 拍照
-     */
-    private void takePicture() {
-        if (cameraDevice == null) return;
-        
-        try {
-            CaptureRequest.Builder captureBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-            captureBuilder.addTarget(imageReader.getSurface());
-            
-            int rotation = getWindowManager().getDefaultDisplay().getRotation();
-            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, ORIENTATIONS.get(rotation));
-            
-            cameraCaptureSession.stopRepeating();
-            cameraCaptureSession.capture(
-                    captureBuilder.build(),
-                    new CameraCaptureSession.CaptureCallback() {
-                        @Override
-                        public void onCaptureCompleted(@NonNull CameraCaptureSession session,
-                                                       @NonNull CaptureRequest request,
-                                                       @NonNull TotalCaptureResult result) {
-                            super.onCaptureCompleted(session, request, result);
-                            updatePreview();
-                        }
-                    },
-                    null
-            );
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Failed to take picture", e);
-        }
-    }
-    
-    /**
-     * 图像捕获监听器
-     */
-    private final ImageReader.OnImageAvailableListener imageAvailableListener = reader -> {
-        Image image = reader.acquireLatestImage();
-        if (image == null) return;
-        
-        ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-        byte[] bytes = new byte[buffer.remaining()];
-        buffer.get(bytes);
-        image.close();
-        
-        // 委托给Presenter处理图像数据
-        if (presenter != null) {
-            presenter.onImageCaptured(bytes);
-        }
-    };
-    
-    /**
-     * 关闭相机
-     */
-    private void closeCamera() {
-        if (cameraCaptureSession != null) {
-            cameraCaptureSession.close();
-            cameraCaptureSession = null;
-        }
-        
-        if (cameraDevice != null) {
-            cameraDevice.close();
-            cameraDevice = null;
-        }
-        
-        if (imageReader != null) {
-            imageReader.close();
-            imageReader = null;
-        }
-    }
-    
-    /**
-     * 更新ISO参数（委托给Presenter处理业务逻辑）
-     */
-    public void updateIsoParameter(int iso) {
-        if (previewRequestBuilder != null) {
-            // 切换到手动模式
-            switchToManualMode();
-            previewRequestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
-            updatePreview();
-        }
-    }
-    
-    /**
-     * 更新曝光时间参数（委托给Presenter处理业务逻辑）
-     */
-    public void updateExposureParameter(long exposure) {
-        if (previewRequestBuilder != null) {
-            // 切换到手动模式
-            switchToManualMode();
-            previewRequestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposure);
-            updatePreview();
-        }
-    }
-    
-    /**
-     * 切换到手动模式（关闭自动曝光）
-     */
-    private void switchToManualMode() {
-        if (previewRequestBuilder != null) {
-            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
-            previewRequestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
-            
-            // 设置默认的手动参数，防止参数为空导致黑屏
-            if (isoRange != null && exposureRange != null) {
-                // 如果没有设置过ISO，使用中间值
-                Integer currentIso = previewRequestBuilder.get(CaptureRequest.SENSOR_SENSITIVITY);
-                if (currentIso == null) {
-                    int defaultIso = (isoRange.getLower() + isoRange.getUpper()) / 4; // 使用较低的ISO
-                    previewRequestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, defaultIso);
-                    Log.d(TAG, "Set default ISO: " + defaultIso);
-                }
-                
-                // 如果没有设置过曝光时间，使用中间值
-                Long currentExposure = previewRequestBuilder.get(CaptureRequest.SENSOR_EXPOSURE_TIME);
-                if (currentExposure == null) {
-                    long defaultExposure = (exposureRange.getLower() + exposureRange.getUpper()) / 4; // 使用较短的曝光时间
-                    previewRequestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, defaultExposure);
-                    Log.d(TAG, "Set default exposure: " + defaultExposure + " ns");
-                }
-            }
-            
-            Log.d(TAG, "Switched to manual exposure mode");
-        }
-    }
-    
-    // =============================================================================
-    // 工具方法
-    // =============================================================================
-    
-    /**
-     * 调整TextureView的宽高比以匹配相机预览，避免拉伸（简化版）
-     */
-    private void adjustTextureViewAspectRatio(Size previewSize, int viewWidth, int viewHeight) {
-        if (previewSize == null || textureView == null) {
-            return;
-        }
-        
-        int previewWidth = previewSize.getWidth();
-        int previewHeight = previewSize.getHeight();
-        
-        // 考虑设备方向，对于手机通常需要交换宽高
-        if (sensorOrientation == 90 || sensorOrientation == 270) {
-            previewWidth = previewSize.getHeight();
-            previewHeight = previewSize.getWidth();
-        }
-        
-        // 计算相机预览的宽高比
-        float previewAspectRatio = (float) previewWidth / previewHeight;
-        
-        // 计算TextureView容器的宽高比
-        float viewAspectRatio = (float) viewWidth / viewHeight;
-        
-        Log.d(TAG, "Preview aspect ratio: " + previewAspectRatio + " (" + previewWidth + "x" + previewHeight + ")");
-        Log.d(TAG, "View aspect ratio: " + viewAspectRatio + " (" + viewWidth + "x" + viewHeight + ")");
-        
-        // 检查是否需要调整
-        if (Math.abs(previewAspectRatio - viewAspectRatio) < 0.1f) {
-            Log.d(TAG, "Aspect ratios are similar, no adjustment needed");
-            return;
-        }
-        
-        // 在UI线程中调整TextureView尺寸（只使用布局调整，不使用Matrix变换）
-        runOnUiThread(() -> {
-            int newWidth, newHeight;
-            
-            if (previewAspectRatio > viewAspectRatio) {
-                // 相机预览更宽，以宽度为准，调整高度
-                newWidth = viewWidth;
-                newHeight = Math.round(viewWidth / previewAspectRatio);
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CAMERA_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startCamera();
             } else {
-                // 相机预览更高，以高度为准，调整宽度
-                newHeight = viewHeight;
-                newWidth = Math.round(viewHeight * previewAspectRatio);
+                Toast.makeText(this, "需要相机权限", Toast.LENGTH_SHORT).show();
             }
-            
-            // 设置TextureView的布局参数
-            android.view.ViewGroup.LayoutParams layoutParams = textureView.getLayoutParams();
-            if (layoutParams != null) {
-                layoutParams.width = newWidth;
-                layoutParams.height = newHeight;
-                textureView.setLayoutParams(layoutParams);
-                
-                Log.d(TAG, "Adjusted TextureView size to: " + newWidth + "x" + newHeight);
-            }
-            
-            // 清除任何可能存在的Matrix变换
-            android.graphics.Matrix matrix = new android.graphics.Matrix();
-            textureView.setTransform(matrix);
-            
-            Log.d(TAG, "Reset TextureView transform to identity matrix");
-        });
-    }
-    
-    /**
-     * 选择最优的相机输出尺寸（简化版，优先保证稳定性）
-     */
-    private static Size chooseOptimalSize(Size[] choices, int width, int height, Size aspectRatio) {
-        if (choices == null || choices.length == 0) {
-            Log.e("CameraUtils", "No size choices available");
-            return new Size(640, 480); // 默认尺寸
-        }
-        
-        // 打印所有可用尺寸
-        Log.d("CameraUtils", "Available preview sizes:");
-        for (Size size : choices) {
-            Log.d("CameraUtils", "  " + size.getWidth() + "x" + size.getHeight());
-        }
-        
-        // 简化策略：选择面积适中的尺寸，避免过大或过小
-        List<Size> suitableSizes = new ArrayList<>();
-        
-        // 计算目标面积
-        int targetArea = width * height;
-        
-        for (Size option : choices) {
-            int optionArea = option.getWidth() * option.getHeight();
-            
-            // 选择面积在目标的 0.5x 到 4x 之间的尺寸
-            if (optionArea >= targetArea / 2 && optionArea <= targetArea * 4) {
-                suitableSizes.add(option);
-                Log.d("CameraUtils", "Suitable size: " + option.getWidth() + "x" + option.getHeight());
-            }
-        }
-        
-        Size selectedSize;
-        if (!suitableSizes.isEmpty()) {
-            // 从合适的尺寸中选择中等面积的
-            selectedSize = suitableSizes.get(suitableSizes.size() / 2);
-        } else {
-            // 如果没有合适的，选择中等大小的
-            Arrays.sort(choices, new CompareSizesByArea());
-            selectedSize = choices[choices.length / 2];
-        }
-        
-        Log.d("CameraUtils", "Selected size: " + selectedSize.getWidth() + "x" + selectedSize.getHeight() + 
-              " for target: " + width + "x" + height);
-        
-        return selectedSize;
-    }
-    
-    /**
-     * 尺寸面积比较器
-     */
-    static class CompareSizesByArea implements Comparator<Size> {
-        @Override
-        public int compare(Size lhs, Size rhs) {
-            return Long.signum((long) lhs.getWidth() * lhs.getHeight() -
-                    (long) rhs.getWidth() * rhs.getHeight());
         }
     }
 }

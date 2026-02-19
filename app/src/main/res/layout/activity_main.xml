@@ -1,224 +1,112 @@
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/black">
+    android:orientation="vertical"
+    android:background="#000000">
 
-    <!-- 相机预览 -->
-    <TextureView
-        android:id="@+id/tv"
+    <!-- 预览区：宽度撑满，高度 = 宽度 × 4/3，保持相机比例，下方自然留黑 -->
+    <android.opengl.GLSurfaceView
+        android:id="@+id/gl_surface_view"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_above="@+id/ll_bottom" />
+        android:layout_height="0dp"
+        android:layout_weight="0"
+        android:layout_gravity="top" />
 
-    <!-- 加载指示器 -->
-    <ProgressBar
-        android:id="@+id/progressBar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_centerInParent="true"
-        android:indeterminateTint="@color/primary_blue"
-        android:visibility="gone" />
-
-    <!-- 顶部控制面板 -->
-    <LinearLayout
-        android:id="@+id/ll_controls"
+    <!-- UI 控制区 -->
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_alignParentTop="true"
-        android:layout_margin="16dp"
-        android:background="@drawable/control_panel_background"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#1A1A1A"
+        android:fillViewport="true">
 
-        <!-- 曝光时间控制 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="vertical"
+            android:padding="12dp">
 
+            <!-- 曝光时间 -->
             <TextView
                 android:id="@+id/tv_exposure"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="曝光时间"
-                android:textColor="@color/control_text"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tv_exposure_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="#20FFFFFF"
-                android:padding="4dp"
-                android:text="--"
-                android:textColor="@color/control_value"
-                android:textSize="12sp" />
-        </LinearLayout>
+                android:text="曝光时间"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp" />
+            <SeekBar
+                android:id="@+id/seekBarExposure"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:max="5000" />
 
-        <SeekBar
-            android:id="@+id/seekBarExposure"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:max="100"
-            android:progressDrawable="@drawable/seekbar_progress"
-            android:thumb="@drawable/seekbar_thumb" />
-
-        <!-- ISO控制 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
+            <!-- ISO -->
             <TextView
                 android:id="@+id/tv_iso"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:text="ISO"
-                android:textColor="@color/control_text"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:textColor="#FFFFFF"
+                android:textSize="13sp" />
+            <SeekBar
+                android:id="@+id/seekBarIso"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:max="5000" />
 
+            <!-- 亮度 -->
             <TextView
-                android:id="@+id/tv_iso_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="#20FFFFFF"
-                android:padding="4dp"
-                android:text="--"
-                android:textColor="@color/control_value"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <SeekBar
-            android:id="@+id/seekBarIso"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:max="100"
-            android:progressDrawable="@drawable/seekbar_progress"
-            android:thumb="@drawable/seekbar_thumb" />
-
-        <!-- 整体亮度控制 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="0dp"
+                android:text="亮度"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp" />
+            <SeekBar
+                android:id="@+id/seekBarBrightness"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="整体亮度"
-                android:textColor="@color/control_text"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:layout_marginBottom="8dp"
+                android:max="5000" />
 
+            <!-- 曝光量显示 -->
             <TextView
-                android:id="@+id/tv_brightness_value"
+                android:id="@+id/tv_display_value"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:background="#20FFFFFF"
-                android:padding="4dp"
-                android:text="自动"
-                android:textColor="@color/control_value"
-                android:textSize="12sp" />
-        </LinearLayout>
+                android:layout_marginBottom="12dp"
+                android:text="E: 0.00"
+                android:textColor="#00FF00"
+                android:textSize="16sp" />
 
-        <SeekBar
-            android:id="@+id/seekBarBrightness"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:max="100"
-            android:progressDrawable="@drawable/seekbar_progress"
-            android:thumb="@drawable/seekbar_thumb" />
-
-        <!-- 曝光量显示 -->
-        <TextView
-            android:id="@+id/tv_display_value"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:layout_marginTop="16dp"
-            android:background="#30000000"
-            android:padding="8dp"
-            android:text="E: --"
-            android:textColor="@color/status_text"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-    </LinearLayout>
-
-    <!-- 底部操作面板 -->
-    <RelativeLayout
-        android:id="@+id/ll_bottom"
-        android:layout_width="match_parent"
-        android:layout_height="100dp"
-        android:layout_alignParentBottom="true"
-        android:background="@drawable/bottom_panel_background"
-        android:padding="16dp">
-
-        <!-- 缩略图预览 -->
-        <ImageView
-            android:id="@+id/iv"
-            android:layout_width="60dp"
-            android:layout_height="60dp"
-            android:layout_centerVertical="true"
-            android:layout_marginStart="8dp"
-            android:background="#20FFFFFF"
-            android:scaleType="centerCrop"
-            android:src="@mipmap/ic_launcher" />
-
-        <!-- 状态信息 -->
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_centerVertical="true"
-            android:layout_toEndOf="@id/iv"
-            android:layout_marginStart="16dp"
-            android:orientation="vertical">
-
-            <TextView
-                android:id="@+id/tv_camera_status"
-                android:layout_width="wrap_content"
+            <!-- 拍照行：缩略图 + 按钮 -->
+            <LinearLayout
+                android:id="@+id/ll_bottom"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="相机就绪"
-                android:textColor="@color/status_text"
-                android:textSize="12sp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <TextView
-                android:id="@+id/tv_photo_count"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:text="已拍摄: 0 张"
-                android:textColor="@color/control_value"
-                android:textSize="10sp" />
+                <ImageView
+                    android:id="@+id/iv"
+                    android:layout_width="0dp"
+                    android:layout_height="70dp"
+                    android:layout_weight="1"
+                    android:scaleType="centerInside"
+                    android:src="@mipmap/ic_launcher" />
+
+                <Button
+                    android:id="@+id/btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="拍照" />
+
+            </LinearLayout>
 
         </LinearLayout>
+    </ScrollView>
 
-        <!-- 拍照按钮 -->
-        <Button
-            android:id="@+id/btn"
-            android:layout_width="68dp"
-            android:layout_height="68dp"
-            android:layout_alignParentEnd="true"
-            android:layout_centerVertical="true"
-            android:layout_marginEnd="8dp"
-            android:background="@drawable/capture_button_background"
-            android:text="📷"
-            android:textColor="@color/white"
-            android:textSize="24sp" />
-
-    </RelativeLayout>
-
-</RelativeLayout>
+</LinearLayout>
