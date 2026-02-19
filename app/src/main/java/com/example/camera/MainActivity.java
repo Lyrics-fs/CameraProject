@@ -58,6 +58,9 @@ public class MainActivity extends AppCompatActivity {
     private Button captureButton;
     private ImageView imageView;
     private TextView tvBrightnessValue;
+    private TextView tvExposureLabel;
+    private TextView tvIsoLabel;
+    private TextView tvBrightnessLabel;
     private SeekBar seekBarBrightness, seekBarIso, seekBarExposure;
 
     // OpenGL ES 渲染器
@@ -85,10 +88,13 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        glSurfaceView    = findViewById(R.id.gl_surface_view);
-        captureButton    = findViewById(R.id.btn);
-        imageView        = findViewById(R.id.iv);
+        glSurfaceView     = findViewById(R.id.gl_surface_view);
+        captureButton     = findViewById(R.id.btn);
+        imageView         = findViewById(R.id.iv);
         tvBrightnessValue = findViewById(R.id.tv_display_value);
+        tvExposureLabel   = findViewById(R.id.tv_exposure);
+        tvIsoLabel        = findViewById(R.id.tv_iso);
+        tvBrightnessLabel = findViewById(R.id.tv_brightness_label);
         seekBarBrightness = findViewById(R.id.seekBarBrightness);
         seekBarIso        = findViewById(R.id.seekBarIso);
         seekBarExposure   = findViewById(R.id.seekBarExposure);
@@ -265,6 +271,7 @@ public class MainActivity extends AppCompatActivity {
         seekBarBrightness.setProgress(0);
         applyCamera2Options();
         updateBrightnessDisplay();
+        runOnUiThread(() -> tvIsoLabel.setText(String.valueOf(currentIso)));
         Log.d(TAG, "ISO=" + currentIso);
     }
 
@@ -275,6 +282,11 @@ public class MainActivity extends AppCompatActivity {
         seekBarBrightness.setProgress(0);
         applyCamera2Options();
         updateBrightnessDisplay();
+        double expSec = currentExposure / 1_000_000_000.0;
+        String expStr = expSec >= 1.0
+                ? String.format("%.2f s", expSec)
+                : String.format("1/%.0f s", 1.0 / expSec);
+        runOnUiThread(() -> tvExposureLabel.setText(expStr));
         Log.d(TAG, "Exposure=" + currentExposure + " ns");
     }
 
@@ -288,28 +300,23 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 seekBarIso.setProgress(0);
                 seekBarExposure.setProgress(0);
+                tvIsoLabel.setText("—");
+                tvExposureLabel.setText("—");
             });
             applyCamera2Options();
         }
         // GL 亮度增益：0→0.5x，5000→2.0x
         float glBrightness = 0.5f + (progress / 5000f) * 1.5f;
         cameraRenderer.setBrightness(glBrightness);
+        String gainStr = String.format("×%.1f", glBrightness);
+        runOnUiThread(() -> tvBrightnessLabel.setText(gainStr));
         updateBrightnessDisplay1(progress);
     }
 
     private void updateBrightnessDisplay() {
         if (isoRange == null || exposureRange == null) return;
-        int expProg = seekBarExposure.getProgress();
-        int isoProg = seekBarIso.getProgress();
-        long exp = exposureRange.getLower() +
-                (long) ((exposureRange.getUpper() - exposureRange.getLower()) * (expProg / 5000f));
-        int iso = isoRange.getLower() +
-                (int) ((isoRange.getUpper() - isoRange.getLower()) * (isoProg / 5000f));
-        double E = iso * (exp / 1_000_000_000.0);
-        runOnUiThread(() -> {
-            tvBrightnessValue.setText(String.format("E: %.2f", E));
-            tvBrightnessValue.setTextColor(Color.GREEN);
-        });
+        double E = currentIso * (currentExposure / 1_000_000_000.0);
+        runOnUiThread(() -> tvBrightnessValue.setText(String.format("E = %.2f", E)));
     }
 
     private void updateBrightnessDisplay1(int progress) {
@@ -319,10 +326,7 @@ public class MainActivity extends AppCompatActivity {
         int iso = isoRange.getLower() +
                 (int) ((isoRange.getUpper() - isoRange.getLower()) * (progress / 5000f));
         double E = iso * (exp / 1_000_000_000.0);
-        runOnUiThread(() -> {
-            tvBrightnessValue.setText(String.format("E: %.2f", E));
-            tvBrightnessValue.setTextColor(Color.GREEN);
-        });
+        runOnUiThread(() -> tvBrightnessValue.setText(String.format("E = %.2f", E)));
     }
 
     // -------------------------------------------------------------------------

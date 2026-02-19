@@ -2,18 +2,44 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    
-    <!-- Camera App Colors -->
-    <color name="primary_dark">#1A1A1A</color>
-    <color name="primary_blue">#2196F3</color>
-    <color name="accent_green">#4CAF50</color>
-    <color name="control_background">#80000000</color>
+
+    <!-- Camera App - Dark Theme -->
+    <color name="bg_root">#0D0D0D</color>
+    <color name="bg_panel">#1C1C1E</color>
+    <color name="bg_card">#2C2C2E</color>
+    <color name="bg_card_stroke">#3A3A3C</color>
+
+    <!-- Accent -->
+    <color name="accent_orange">#FF9500</color>
+    <color name="accent_orange_dim">#99FF9500</color>
+    <color name="accent_blue">#0A84FF</color>
+    <color name="accent_blue_dim">#330A84FF</color>
+    <color name="accent_green">#30D158</color>
+
+    <!-- Text -->
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#AEAEB2</color>
+    <color name="text_label">#8E8E93</color>
+    <color name="text_value">#FF9500</color>
+
+    <!-- Capture button -->
+    <color name="button_capture">#FF9500</color>
+    <color name="button_capture_pressed">#CC7700</color>
+    <color name="button_capture_ring">#FFFFFF</color>
+
+    <!-- SeekBar -->
+    <color name="seekbar_track">#3A3A3C</color>
+    <color name="seekbar_progress">#0A84FF</color>
+    <color name="seekbar_thumb">#0A84FF</color>
+
+    <!-- Status -->
+    <color name="status_text">#30D158</color>
+    <color name="error_text">#FF453A</color>
+
+    <!-- Legacy aliases -->
+    <color name="primary_dark">#1C1C1E</color>
+    <color name="primary_blue">#0A84FF</color>
+    <color name="control_background">#2C2C2E</color>
     <color name="control_text">#FFFFFF</color>
-    <color name="control_value">#E0E0E0</color>
-    <color name="button_capture">#FF4444</color>
-    <color name="button_capture_pressed">#CC3333</color>
-    <color name="seekbar_progress">#2196F3</color>
-    <color name="seekbar_thumb">#1976D2</color>
-    <color name="status_text">#4CAF50</color>
-    <color name="error_text">#F44336</color>
+    <color name="control_value">#AEAEB2</color>
 </resources>
