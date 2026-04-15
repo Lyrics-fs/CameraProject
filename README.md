@@ -1,117 +1,157 @@
-# CameraProject - 基于相机响应曲线的Android相机应用
+# CameraProject - 基于相机响应曲线的 Android 相机应用
 
 ## 项目简介
 
-CameraProject是河海大学大创项目，专注于基于相机响应曲线的Android相机软件开发。本应用利用Android Camera2 API实现了对相机参数的精确控制，包括ISO感光度、曝光时间等，并能根据拍摄图像生成伪彩色图像，用于可视化分析场景亮度分布。
+CameraProject 是河海大学大创项目，面向移动端相机响应曲线应用场景。项目基于 `CameraX + Camera2 Interop + OpenGL ES`，支持手动控制 ISO/曝光，并在拍照后生成伪彩色结果图用于亮度可视化分析。
 
-### 技术背景
+## 当前实现概览（已与代码同步）
 
-相机响应曲线描述了场景辐射亮度与相机输出之间的关系，是计算机视觉和摄影学中的重要概念。通过对相机响应曲线的研究和应用，可以实现：
-- 高动态范围(HDR)图像合成
-- 场景亮度的精确测量
-- 图像亮度校正和增强
-- 不同曝光条件下图像的标准化处理
-
-### 研究意义
-
-本项目通过Android平台实现相机响应曲线的应用，为移动设备上的计算摄影学研究提供了实用工具，可应用于以下领域：
-- 环境光照测量与分析
-- 建筑物光照条件评估
-- 摄影教学与实践
-- 计算机视觉研究
+- 预览链路：`CameraX Preview` 输出到 `SurfaceTexture`，由 `GLSurfaceView` 渲染。
+- 渲染模式：`RENDERMODE_WHEN_DIRTY`，按帧触发 `requestRender()`，降低空闲耗电。
+- 参数控制：通过 Camera2 Interop 设置 `SENSOR_SENSITIVITY` 与 `SENSOR_EXPOSURE_TIME`。
+- 拍照链路：`ImageCapture.OnImageCapturedCallback` + `ImageProxy`，并使用 `try/finally` 保证释放。
+- 图像处理：拍照后执行伪彩色映射、图例绘制、亮度信息叠加。
+- 存储策略：使用 `MediaStore` 保存到 `DCIM/Camera`，兼容 Android 10+ 分区存储。
+- 架构分层：`MainActivity(View/I-O) + Presenter(编排) + Model(算法) + ImageRepository(存储/EXIF)`。
+- 自动曝光辅助：`ImageAnalysis(640x480)` 实时测光，支持推荐模式/手动模式切换。
+- 自动微调策略：可开关自动下发，含稳定帧、防抖阈值、节流与手动后暂停。
+- 参数面板：推荐模式下提供可折叠“高级参数”（自动微调、稳定帧、步进、BV 阈值、AE-L）。
+- 错误处理：统一状态区展示 + Toast + 重试按钮。
+- 测试：包含 Presenter 单元测试与 androidTest 基础验证。
 
 ## 功能特性
 
 ### 核心功能
-- **手动相机参数控制**：精确调节ISO感光度和曝光时间
-- **实时预览**：相机参数调整实时反馈到预览画面
-- **伪彩色图像生成**：将灰度图转换为伪彩色图像，直观显示亮度分布
-- **亮度计算与显示**：基于相机参数计算场景亮度值(cd/m²)
-- **EXIF数据提取**：读取图像元数据中的亮度信息
-- **图像保存**：同时保存原始图像和伪彩色处理后的图像
 
-### 相机响应曲线相关功能
-- 基于公式 L = 2.9 × exp(0.729×BV) 计算场景亮度
-- 亮度区间可视化显示
-- 多点采样计算平均亮度
+- 手动相机参数控制：精确调节 ISO、曝光时间、亮度增益。
+- 推荐模式控制：显示实时推荐 ISO/曝光，支持手动“一键应用推荐值”。
+- 自动微调开关：开启后满足条件自动下发参数，关闭后仅推荐不自动下发。
+- 自动微调防抖：连续稳定帧、BV 差值阈值、500ms 最小下发间隔。
+- 自动微调安全控制：自动模式每次仅走小步（20/25/30%）并限制在预览安全范围。
+- 手动优先：用户拖动滑杆后自动微调立即暂停（默认 5s）。
+- 实时预览：参数修改可实时反馈到预览画面。
+- 伪彩色图像生成：将图像亮度映射为伪彩色并附带图例。
+- 亮度计算与显示：基于公式估计场景亮度。
+- EXIF 信息读取：读取亮度相关元数据（可用时）。
+- 图像保存：保存原图与伪彩图到系统图库路径 `DCIM/Camera`。
 
-### 用户界面特性
-- 直观的滑动条控制相机参数
-- 实时显示计算得到的亮度值
-- 伪彩色图像附带亮度图例
-- 简洁的拍照和预览界面
+### 相机响应曲线相关
+
+- 使用公式 `L = 2.9 × exp(0.729 × BV)` 估算亮度。
+- 多点采样计算平均亮度信息并叠加到结果图。
+- 输出亮度区间可视化图例，便于分析分布。
 
 ## 技术架构
 
 ### 环境要求
-- Android SDK 24+（Android 7.0及以上）
-- 支持Camera2 API的Android设备
-- 编译SDK 35
+
+- Android SDK 24+（Android 7.0 及以上）
+- Compile SDK 35
+- JDK 11+
+- 支持 Camera2 的 Android 设备
 
 ### 主要技术栈
-- **Camera2 API**：提供对相机硬件的底层控制
-- **TextureView**：高性能相机预览显示
-- **ImageReader**：高效图像数据处理
-- **ExifInterface**：读取图像元数据
-- **Canvas & Bitmap**：图像处理与伪彩色转换
 
-### 核心算法
-- **相机响应曲线计算**：L = 2.9 × exp(0.729×BV)
-- **伪彩色映射算法**：基于灰度值区间的彩色映射
-- **亮度区间划分**：动态计算亮度L的区间范围
-- **图像旋转与处理**：处理不同设备方向的图像校正
+- `CameraX`：预览与拍照主流程
+- `Camera2 Interop`：手动参数下发
+- `GLSurfaceView + OpenGL ES 2.0`：实时伪彩渲染
+- `ExifInterface`：EXIF 读取
+- `MediaStore`：分区存储写入
+- `Canvas & Bitmap`：拍照结果图后处理
 
-## 安装和使用
+### 关键模块
 
-### 环境配置
-1. Android Studio 4.0+
-2. JDK 11+
-3. Gradle 8.0+
+- `MainActivity`：UI、权限流转、相机回调与流程协调
+- `CameraRenderer`：OpenGL 渲染与 `SurfaceTexture` 管理
+- `CameraPresenter`：参数变化、状态与业务编排（含自动微调触发链路）
+- `presenter/state/AutoTuneState`：自动微调状态聚合（开关、节流、稳定帧、步进、阈值）
+- `CameraModel`：伪彩算法与亮度计算
+- `ImageRepository`：MediaStore 存储与 EXIF 读取
+
+## 安装与运行
 
 ### 编译步骤
-1. 克隆项目到本地
+
+1. 克隆项目：
+   ```bash
+   git clone https://github.com/Lyrics-fs/CameraProject.git
    ```
-   git clone https://github.com/yourusername/CameraProject.git
+2. 使用 Android Studio 打开项目并同步 Gradle。
+3. 连接真机（开启 USB 调试）或启动模拟器。
+4. 运行：
+   ```bash
+   ./gradlew :app:assembleDebug
    ```
-2. 使用Android Studio打开项目
-3. 同步Gradle依赖
-4. 构建并运行应用
 
-### 使用说明
-1. 启动应用后，授予相机和存储权限
-2. 使用滑动条调节ISO、曝光时间或整体亮度
-3. 点击"拍照"按钮捕获图像
-4. 查看生成的伪彩色图像及亮度分析
-5. 图像将自动保存到设备的DCIM/Camera目录
+### 常用命令
 
-## 项目结构
+- 编译 Debug：
+  ```bash
+  ./gradlew :app:assembleDebug
+  ```
+- 运行单元测试：
+  ```bash
+  ./gradlew testDebugUnitTest
+  ```
+- 安装到设备：
+  ```bash
+  ./gradlew :app:installDebug
+  ```
 
-### 主要文件说明
-- `MainActivity.java`：应用主要逻辑和相机控制
-- `activity_main.xml`：用户界面布局
-- `AndroidManifest.xml`：应用配置和权限声明
+## 使用说明
 
-### 关键类和方法
-- `MainActivity`：应用入口和相机控制核心
-- `openCamera()`：初始化并打开相机
-- `takePicture()`：捕获静态图像
-- `createPseudoColorImage()`：生成伪彩色图像和亮度图例
-- `updateBrightness()/updateIso()/updateExposure()`：更新相机参数
+1. 首次启动授予相机权限（若永久拒绝，可通过设置页引导恢复）。
+2. 通过“切换到推荐模式 / 切换到手动模式”选择控制方式。
+3. 推荐模式下可点击“应用推荐值”，或在“高级参数”中开启自动微调。
+4. “高级参数”可调：稳定帧（3/4/5）、步进（20/25/30%）、BV 阈值（0.15/0.20/0.25）、AE-L。
+5. 手动模式下使用滑杆调节 ISO/曝光/亮度增益。
+6. 点击拍照按钮生成原图与伪彩图，并在界面查看最近结果缩略图与曝光量状态。
+7. 若出现异常，可在状态区点击“重试”。
 
-## 开发团队
+## 参考资料
 
-### 团队成员
-- [团队成员姓名1] - [角色/职责]
-- [团队成员姓名2] - [角色/职责]
-- [团队成员姓名3] - [角色/职责]
+- [CameraX 文档](https://developer.android.com/media/camera/camerax)
+- [Camera2 文档](https://developer.android.com/reference/android/hardware/camera2/package-summary)
+- [MediaStore 文档](https://developer.android.com/training/data-storage/shared/media)
 
-### 指导老师
-- [指导老师姓名] - [所属院系]
+## 最近优化记录
 
-### 参考资料
-- Camera2 API官方文档: https://developer.android.com/reference/android/hardware/camera2/package-summary
-- 相机响应曲线理论: [相关论文或书籍引用]
-- 伪彩色图像处理技术: [相关技术文档]
+### 2026-04（稳定性与架构优化）
+
+- 存储策略升级：从旧外部目录写入迁移到 `MediaStore`，提升 Android 10+ 兼容性。
+- 资源释放完善：补齐 `ImageProxy`、`ExecutorService`、`Surface`、`SurfaceTexture`、GL 纹理与 Program 的释放链路。
+- 内存峰值优化：拍照链路改为采样解码，回收中间 `Bitmap`，降低卡顿与 OOM 风险。
+- 架构整理：推进 `MainActivity + Presenter + Model + ImageRepository` 分层，减少主界面业务耦合。
+- 权限流程升级：迁移到 `ActivityResultContracts`，补充永久拒绝后“去设置”引导。
+- 参数下发优化：滑杆联动增加防重入与节流（Debug/Release 可配置），降低抖动。
+- 渲染降耗：改为 `RENDERMODE_WHEN_DIRTY` + 按帧 `requestRender()`。
+- 错误处理统一：增加状态区展示、错误高亮、重试按钮与统一错误入口。
+- 依赖治理：统一使用 `libs.versions.toml` 管理 CameraX/Exif/Mockito 版本。
+- 测试补强：新增 Presenter 单测，修复 instrumentation 包名断言并补充基础资源校验。
+- 自动曝光辅助：引入 `ImageAnalysis` 实时测光与推荐值生成（低分辨率 + 最新帧策略）。
+- 自动微调落地：支持开关、3/4/5 稳定帧判定、BV 阈值判定、500ms 节流、手动后暂停。
+- 参数策略完善：自动下发采用小步收敛（20/25/30%）并强制预览安全范围。
+- 推荐模式 UX：新增模式切换、应用推荐值、AE-L 与可折叠高级参数面板。
+- 架构可维护性：将自动微调状态抽取为 `AutoTuneState`，并拆分 Presenter/Activity 方法以降低复杂度。
+
+### 按优先级归类（用于汇报）
+
+- **P0（高优先，稳定性/兼容性）**
+  - `MediaStore` 存储迁移（替代旧外部目录写法）
+  - `ImageProxy/线程池/GL 资源` 生命周期释放完善
+  - 权限流程升级（`ActivityResultContracts` + 永久拒绝引导）
+
+- **P1（中优先，性能/体验）**
+  - 拍照链路采样解码与中间位图回收，降低内存峰值
+  - 滑杆参数下发防重入 + 节流，减少抖动
+  - 预览渲染从持续模式改为按帧触发，降低耗电
+  - 统一错误状态区 + 重试按钮，提升可恢复性
+
+- **P2（中低优先，工程治理）**
+  - 推进 MVP 分层，降低 `MainActivity` 复杂度
+  - 依赖统一接入 version catalog，减少版本漂移
+  - 测试覆盖从模板扩展到可回归用例（单测 + instrumentation）
 
 ## 许可证
-本项目采用[许可证类型]许可证 - 详情请参阅LICENSE文件
+
+本项目使用仓库中的 `LICENSE` 许可条款。

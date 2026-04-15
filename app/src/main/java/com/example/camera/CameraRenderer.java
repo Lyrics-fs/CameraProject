@@ -99,14 +99,23 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
     private SurfaceTexture surfaceTexture;
 
     private OnSurfaceTextureAvailableListener listener;
+    private OnFrameAvailableListener frameAvailableListener;
     private volatile float brightness = 1.0f; // 亮度增益，由主线程设置
 
     public interface OnSurfaceTextureAvailableListener {
         void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture);
     }
 
+    public interface OnFrameAvailableListener {
+        void onFrameAvailable();
+    }
+
     public void setOnSurfaceTextureAvailableListener(OnSurfaceTextureAvailableListener l) {
         this.listener = l;
+    }
+
+    public void setOnFrameAvailableListener(OnFrameAvailableListener listener) {
+        this.frameAvailableListener = listener;
     }
 
     public void setBrightness(float brightness) {
@@ -134,6 +143,11 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
 
         // 创建 SurfaceTexture 并通知主线程
         surfaceTexture = new SurfaceTexture(cameraTextureId[0]);
+        surfaceTexture.setOnFrameAvailableListener(st -> {
+            if (frameAvailableListener != null) {
+                frameAvailableListener.onFrameAvailable();
+            }
+        });
         if (listener != null) {
             listener.onSurfaceTextureAvailable(surfaceTexture);
         }
@@ -190,6 +204,11 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
 
     @Override
     public void onDrawFrame(GL10 gl) {
+        if (program == 0) {
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+            return;
+        }
+
         // 更新相机帧到 OES 纹理，并获取方向变换矩阵
         if (surfaceTexture != null) {
             surfaceTexture.updateTexImage();
@@ -230,5 +249,28 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
 
     public SurfaceTexture getSurfaceTexture() {
         return surfaceTexture;
+    }
+
+    /**
+     * Must be called on GL thread to release GPU resources safely.
+     */
+    public void release() {
+        if (surfaceTexture != null) {
+            surfaceTexture.release();
+            surfaceTexture = null;
+        }
+
+        if (cameraTextureId[0] != 0) {
+            GLES20.glDeleteTextures(1, cameraTextureId, 0);
+            cameraTextureId[0] = 0;
+        }
+
+        if (program != 0) {
+            GLES20.glDeleteProgram(program);
+            program = 0;
+        }
+
+        listener = null;
+        frameAvailableListener = null;
     }
 }

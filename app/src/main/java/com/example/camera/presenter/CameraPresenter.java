@@ -2,389 +2,486 @@ package com.example.camera.presenter;
 
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.hardware.camera2.CameraAccessException;
-import android.hardware.camera2.CameraCharacteristics;
-import android.hardware.camera2.CameraDevice;
-import android.hardware.camera2.CameraManager;
-import android.hardware.camera2.CaptureRequest;
-import android.hardware.camera2.params.StreamConfigurationMap;
-import android.util.Log;
+import android.util.Size;
 import android.util.Range;
+
+import androidx.camera.core.ImageAnalysis;
+import androidx.camera.core.ImageProxy;
 
 import com.example.camera.R;
 import com.example.camera.contract.CameraContract;
 import com.example.camera.model.AppState;
 import com.example.camera.model.CameraModel;
 import com.example.camera.model.CameraSettings;
+import com.example.camera.presenter.state.AutoTuneState;
 
-/**
- * 业务逻辑层Presenter实现
- * 负责处理UI交互和相机控制逻辑
- */
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 public class CameraPresenter implements CameraContract.Presenter {
-    private static final String TAG = "CameraPresenter";
-    
-    private CameraContract.View view;
-    private CameraContract.Model model;
-    private Context context;
-    private CameraManager cameraManager;
-    
-    // 相机相关
-    private String cameraId = "0";
-    private CameraDevice cameraDevice;
+    private static final int SEEK_MAX = 5000;
+    private static final int AUTO_EXPOSURE_ANALYSIS_WIDTH = 640;
+    private static final int AUTO_EXPOSURE_ANALYSIS_HEIGHT = 480;
+    private static final int ISO_DEADBAND = 30;
+    private static final long EXPOSURE_DEADBAND_NS = 500_000L;
+    private static final double BV_DEADBAND = 0.15;
+    private static final double AUTO_APPLY_BV_DELTA_THRESHOLD_DEFAULT = 0.2;
+    private static final int AUTO_APPLY_STABLE_FRAME_COUNT_DEFAULT = 3;
+    private static final long AUTO_APPLY_MIN_INTERVAL_MS = 500L;
+    private static final long MANUAL_MODE_HOLD_MS = 5000L;
+    private static final double AUTO_APPLY_STEP_RATIO_DEFAULT = 0.25; // 自动微调每次仅走25%
+    private static final double APPLY_SMOOTHING = 0.6; // 多次点击逐步收敛
+    // 预览阶段手动调节的安全范围，避免卡顿。
+    private static final int MANUAL_SAFE_MIN_ISO = 100;
+    private static final int MANUAL_SAFE_MAX_ISO = 800;
+    private static final long MANUAL_SAFE_MIN_EXPOSURE_NS = 2_000_000L;   // 2ms
+    private static final long MANUAL_SAFE_MAX_EXPOSURE_NS = 33_000_000L;  // ~1/30s
+    private static final int PREVIEW_SAFE_MIN_ISO = 100;
+    private static final int PREVIEW_SAFE_MAX_ISO = 800;
+    private static final long PREVIEW_SAFE_MIN_EXPOSURE_NS = 2_000_000L;
+    private static final long PREVIEW_SAFE_MAX_EXPOSURE_NS = 33_000_000L;
+    private final CameraContract.View view;
+    private final CameraContract.Model model;
+    private final ExecutorService analysisExecutor = Executors.newSingleThreadExecutor();
+    private float aperture = 1.8f;
+    private ImageAnalysis imageAnalysis;
+    private CameraModel.ExposureRecommendation lastRecommendation;
+    private CameraModel.ExposureRecommendation lastEmittedRecommendation;
+    private long manualModeUntilMs = 0L;
+    private boolean aeLocked = false;
+    private boolean deferHardwareApply = false;
+    private final AutoTuneState autoTuneState = new AutoTuneState(
+            AUTO_APPLY_STABLE_FRAME_COUNT_DEFAULT,
+            AUTO_APPLY_STEP_RATIO_DEFAULT,
+            AUTO_APPLY_BV_DELTA_THRESHOLD_DEFAULT
+    );
     
     public CameraPresenter(CameraContract.View view, Context context) {
         this.view = view;
-        this.context = context;
         this.model = new CameraModel(context);
-        this.cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
     }
-    
+
+    public void setCameraRanges(Range<Integer> isoRange, Range<Long> exposureRange, float aperture) {
+        CameraSettings settings = model.getCameraSettings();
+        settings.setIsoRange(isoRange);
+        settings.setExposureRange(exposureRange);
+        this.aperture = aperture;
+        settings.setAperture(aperture);
+        if (isoRange != null) settings.setIso(isoRange.getLower());
+        if (exposureRange != null) settings.setExposureTime(exposureRange.getLower());
+        model.updateCameraSettings(settings);
+    }
+
     @Override
     public void onViewCreated() {
-        Log.d(TAG, "View created, initializing UI state");
         AppState appState = model.getAppState();
         view.updateCameraStatus(appState.getCameraStatus());
         view.updatePhotoCount(appState.getPhotoCount());
-        view.updateBrightnessMode(appState.getBrightnessMode().getDisplayName());
-        view.updateExposureValue("E: --");
+        view.updateExposureValue("E = --");
     }
-    
-    @Override
-    public void onResume() {
-        Log.d(TAG, "Presenter resumed");
-        // 在Activity onResume时由View调用初始化相机
-    }
-    
+
+    @Override public void onResume() {}
+
     @Override
     public void onPause() {
-        Log.d(TAG, "Presenter paused");
         closeCamera();
     }
-    
+
     @Override
     public void onDestroy() {
-        Log.d(TAG, "Presenter destroyed");
         closeCamera();
+        analysisExecutor.shutdown();
     }
-    
-    @Override
-    public void initializeCamera() {
-        Log.d(TAG, "Initializing camera");
-        view.showLoading(true);
-        view.updateCameraStatus("正在启动相机...");
-        
-        try {
-            // 获取相机特性
-            CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
-            
-            // 设置相机设置
-            CameraSettings settings = model.getCameraSettings();
-            
-            // 获取ISO和曝光时间范围
-            Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
-            Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
-            
-            if (isoRange != null) {
-                settings.setIsoRange(isoRange);
-                settings.setIso(isoRange.getLower());
-            }
-            
-            if (exposureRange != null) {
-                settings.setExposureRange(exposureRange);
-                settings.setExposureTime(exposureRange.getLower());
-            }
-            
-            // 获取光圈值
-            float[] availableApertures = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES);
-            if (availableApertures != null && availableApertures.length > 0) {
-                settings.setAperture(availableApertures[0]);
-            }
-            
-            // 获取传感器方向
-            Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-            if (sensorOrientation != null) {
-                settings.setSensorOrientation(sensorOrientation);
-            }
-            
-            model.updateCameraSettings(settings);
-            
-            Log.d(TAG, "Camera characteristics loaded: " + settings.toString());
-            
-        } catch (CameraAccessException e) {
-            Log.e(TAG, "Failed to get camera characteristics", e);
-            view.showError("获取相机参数失败");
-            view.showLoading(false);
-        }
-    }
-    
+    @Override public void initializeCamera() {}
+
     @Override
     public void startPreview() {
-        Log.d(TAG, "Starting camera preview");
-        // 预览启动逻辑将在View层的相机回调中处理
-        // 这里主要更新UI状态
         AppState appState = model.getAppState();
-        appState.setLoading(false);
         appState.setCameraStatus("相机就绪");
         model.updateAppState(appState);
-        
-        view.showLoading(false);
         view.updateCameraStatus(appState.getCameraStatus());
-        view.showToast("相机已就绪");
-        
-        // 初始化参数显示
-        updateParameterDisplays();
     }
-    
+
     @Override
     public void takePicture() {
-        Log.d(TAG, "Taking picture");
-        // 拍照逻辑主要在View层处理，这里更新状态
         AppState appState = model.getAppState();
         appState.incrementPhotoCount();
         model.updateAppState(appState);
-        
         view.updatePhotoCount(appState.getPhotoCount());
     }
-    
+
     @Override
     public void closeCamera() {
-        Log.d(TAG, "Closing camera");
-        if (cameraDevice != null) {
-            cameraDevice.close();
-            cameraDevice = null;
-        }
-        
         AppState appState = model.getAppState();
         appState.setCameraStatus("相机已关闭");
-        appState.setLoading(false);
         model.updateAppState(appState);
-        
         view.updateCameraStatus(appState.getCameraStatus());
-        view.showLoading(false);
     }
-    
+
+    @Override public void onPermissionGranted() {}
+
+    @Override
+    public void onPermissionDenied() {
+        AppState appState = model.getAppState();
+        appState.setCameraStatus("权限被拒绝");
+        model.updateAppState(appState);
+        view.updateCameraStatus(appState.getCameraStatus());
+        view.showError("需要相机权限");
+    }
+
+    @Override
+    public void onCameraOpened() {
+        startPreview();
+    }
+
+    @Override
+    public void onCameraDisconnected() {
+        AppState appState = model.getAppState();
+        appState.setCameraStatus("相机断开");
+        model.updateAppState(appState);
+        view.updateCameraStatus(appState.getCameraStatus());
+    }
+
+    @Override
+    public void onCameraError(int error) {
+        AppState appState = model.getAppState();
+        appState.setCameraStatus("相机错误");
+        appState.setLastError("错误码: " + error);
+        model.updateAppState(appState);
+        view.updateCameraStatus(appState.getCameraStatus());
+        view.showError("相机错误: " + error);
+    }
+
+    @Override
+    public void onImageCaptured(byte[] imageData) {
+        takePicture();
+    }
+
+    public Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness) {
+        return model.createPseudoColorImage(originalBitmap, exifBrightness);
+    }
+
+    public Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness, int rotationDegrees) {
+        if (model instanceof CameraModel) {
+            return ((CameraModel) model).createPseudoColorImage(originalBitmap, exifBrightness, rotationDegrees);
+        }
+        return model.createPseudoColorImage(originalBitmap, exifBrightness);
+    }
+
+    public void startAutoExposureAnalysis() {
+        imageAnalysis = new ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setTargetResolution(new Size(AUTO_EXPOSURE_ANALYSIS_WIDTH, AUTO_EXPOSURE_ANALYSIS_HEIGHT))
+                .build();
+
+        imageAnalysis.setAnalyzer(analysisExecutor, image -> {
+            try {
+                CameraModel.ExposureRecommendation recommendation = analyzeExposureRecommendation(image);
+                if (recommendation != null) {
+                    handleExposureRecommendation(recommendation);
+                }
+            } finally {
+                image.close();
+            }
+        });
+    }
+
+    public ImageAnalysis getImageAnalysis() {
+        return imageAnalysis;
+    }
+
     @Override
     public void onIsoChanged(int progress) {
         CameraSettings settings = model.getCameraSettings();
         Range<Integer> isoRange = settings.getIsoRange();
-        
-        if (isoRange != null) {
-            int iso = isoRange.getLower() + (int)((isoRange.getUpper() - isoRange.getLower()) * (progress / 100f));
-            settings.setIso(iso);
-            model.updateCameraSettings(settings);
-            
-            // 更新UI显示
-            view.updateIsoDisplay(iso);
-            view.setSeekBarProgress(R.id.seekBarBrightness, 0);
-            
-            // 实际应用到相机硬件
-            view.applyCameraIsoParameter(iso);
-            
-            // 更新亮度模式
-            AppState appState = model.getAppState();
-            appState.setBrightnessMode(AppState.BrightnessMode.MANUAL);
-            model.updateAppState(appState);
-            view.updateBrightnessMode(appState.getBrightnessMode().getDisplayName());
-            
-            // 更新曝光量显示
-            updateExposureValueDisplay();
-            
-            Log.d(TAG, "ISO changed to: " + iso + ", applied to camera");
+        if (isoRange == null) return;
+
+        int minIso = Math.max(isoRange.getLower(), MANUAL_SAFE_MIN_ISO);
+        int maxIso = Math.min(isoRange.getUpper(), MANUAL_SAFE_MAX_ISO);
+        if (maxIso <= minIso) {
+            minIso = isoRange.getLower();
+            maxIso = isoRange.getUpper();
         }
+        int iso = minIso + (int) ((maxIso - minIso) * (progress / (float) SEEK_MAX));
+        settings.setIso(iso);
+        model.updateCameraSettings(settings);
+
+        view.setSeekBarProgress(R.id.seekBarBrightness, 0);
+        view.updateIsoDisplay(iso);
+        if (!deferHardwareApply) {
+            view.applyCameraIsoParameter(iso);
+        }
+        updateExposureValueDisplay(settings);
     }
-    
+
     @Override
     public void onExposureChanged(int progress) {
         CameraSettings settings = model.getCameraSettings();
         Range<Long> exposureRange = settings.getExposureRange();
-        
-        if (exposureRange != null) {
-            long exposure = exposureRange.getLower() + (long)((exposureRange.getUpper() - exposureRange.getLower()) * (progress / 100f));
-            settings.setExposureTime(exposure);
-            model.updateCameraSettings(settings);
-            
-            // 更新UI显示
-            view.updateExposureDisplay(settings.getFormattedExposureTime());
-            view.setSeekBarProgress(R.id.seekBarBrightness, 0);
-            
-            // 实际应用到相机硬件
-            view.applyCameraExposureParameter(exposure);
-            
-            // 更新亮度模式
-            AppState appState = model.getAppState();
-            appState.setBrightnessMode(AppState.BrightnessMode.MANUAL);
-            model.updateAppState(appState);
-            view.updateBrightnessMode(appState.getBrightnessMode().getDisplayName());
-            
-            // 更新曝光量显示
-            updateExposureValueDisplay();
-            
-            Log.d(TAG, "Exposure changed to: " + exposure + " ns, applied to camera");
+        if (exposureRange == null) return;
+
+        long minExposure = Math.max(exposureRange.getLower(), MANUAL_SAFE_MIN_EXPOSURE_NS);
+        long maxExposure = Math.min(exposureRange.getUpper(), MANUAL_SAFE_MAX_EXPOSURE_NS);
+        if (maxExposure <= minExposure) {
+            minExposure = exposureRange.getLower();
+            maxExposure = exposureRange.getUpper();
         }
+        long exposure = minExposure
+                + (long) ((maxExposure - minExposure) * (progress / (float) SEEK_MAX));
+        settings.setExposureTime(exposure);
+        model.updateCameraSettings(settings);
+
+        view.setSeekBarProgress(R.id.seekBarBrightness, 0);
+        view.updateExposureDisplay(formatExposureTime(exposure));
+        if (!deferHardwareApply) {
+            view.applyCameraExposureParameter(exposure);
+        }
+        updateExposureValueDisplay(settings);
     }
-    
+
     @Override
     public void onBrightnessChanged(int progress) {
         CameraSettings settings = model.getCameraSettings();
         Range<Integer> isoRange = settings.getIsoRange();
         Range<Long> exposureRange = settings.getExposureRange();
-        
-        if (isoRange != null && exposureRange != null) {
-            // 同时调整ISO和曝光时间
-            int iso = isoRange.getLower() + (int)((isoRange.getUpper() - isoRange.getLower()) * (progress / 100f));
-            long exposure = exposureRange.getLower() + (long)((exposureRange.getUpper() - exposureRange.getLower()) * (progress / 100f));
-            
-            settings.setIso(iso);
-            settings.setExposureTime(exposure);
-            model.updateCameraSettings(settings);
-            
-            // 重置其他SeekBar
-            view.setSeekBarProgress(R.id.seekBarIso, 0);
-            view.setSeekBarProgress(R.id.seekBarExposure, 0);
-            
-            // 更新UI显示
-            view.updateIsoDisplay(iso);
-            view.updateExposureDisplay(settings.getFormattedExposureTime());
-            
-            // 实际应用到相机硬件
+        if (isoRange == null || exposureRange == null) return;
+
+        int minIso = Math.max(isoRange.getLower(), MANUAL_SAFE_MIN_ISO);
+        int maxIso = Math.min(isoRange.getUpper(), MANUAL_SAFE_MAX_ISO);
+        if (maxIso <= minIso) {
+            minIso = isoRange.getLower();
+            maxIso = isoRange.getUpper();
+        }
+        long minExposure = Math.max(exposureRange.getLower(), MANUAL_SAFE_MIN_EXPOSURE_NS);
+        long maxExposure = Math.min(exposureRange.getUpper(), MANUAL_SAFE_MAX_EXPOSURE_NS);
+        if (maxExposure <= minExposure) {
+            minExposure = exposureRange.getLower();
+            maxExposure = exposureRange.getUpper();
+        }
+
+        int iso = minIso
+                + (int) ((maxIso - minIso) * (progress / (float) SEEK_MAX));
+        long exposure = minExposure
+                + (long) ((maxExposure - minExposure) * (progress / (float) SEEK_MAX));
+
+        settings.setIso(iso);
+        settings.setExposureTime(exposure);
+        model.updateCameraSettings(settings);
+
+        view.setSeekBarProgress(R.id.seekBarIso, 0);
+        view.setSeekBarProgress(R.id.seekBarExposure, 0);
+        view.updateIsoDisplay(-1);
+        view.updateExposureDisplay("—");
+
+        if (!deferHardwareApply) {
             view.applyCameraIsoParameter(iso);
             view.applyCameraExposureParameter(exposure);
-            
-            // 更新亮度模式
-            AppState appState = model.getAppState();
-            appState.setBrightnessMode(progress == 0 ? AppState.BrightnessMode.AUTO : AppState.BrightnessMode.MANUAL);
-            model.updateAppState(appState);
-            view.updateBrightnessMode(appState.getBrightnessMode().getDisplayName());
-            
-            // 更新曝光量显示
-            updateExposureValueDisplay();
-            
-            Log.d(TAG, "Brightness adjusted - ISO: " + iso + ", Exposure: " + exposure + ", applied to camera");
         }
+
+        float gain = 0.5f + (progress / (float) SEEK_MAX) * 1.5f;
+        view.setPreviewBrightness(gain);
+        view.updateBrightnessMode(String.format("×%.1f", gain));
+        updateExposureValueDisplay(settings);
     }
-    
-    @Override
-    public void onPermissionGranted() {
-        Log.d(TAG, "Camera permission granted");
-        initializeCamera();
+
+    private void updateExposureValueDisplay(CameraSettings settings) {
+        double exposureValue = model.calculateExposureValue(
+                settings.getIso(), settings.getExposureTime(), aperture);
+        view.updateExposureValue(String.format("E = %.2f", exposureValue));
     }
-    
-    @Override
-    public void onPermissionDenied() {
-        Log.d(TAG, "Camera permission denied");
-        view.showError("相机权限被拒绝，无法使用相机功能");
-        
-        AppState appState = model.getAppState();
-        appState.setCameraStatus("权限被拒绝");
-        model.updateAppState(appState);
-        view.updateCameraStatus(appState.getCameraStatus());
+
+    private String formatExposureTime(long exposureNs) {
+        double expSec = exposureNs / 1_000_000_000.0;
+        if (expSec >= 1.0) {
+            return String.format("%.2f s", expSec);
+        }
+        return String.format("1/%.0f s", 1.0 / expSec);
     }
-    
-    @Override
-    public void onCameraOpened() {
-        Log.d(TAG, "Camera opened successfully");
-        startPreview();
+
+    private boolean shouldEmitRecommendation(CameraModel.ExposureRecommendation candidate) {
+        if (lastEmittedRecommendation == null) return true;
+        return Math.abs(candidate.recommendedIso - lastEmittedRecommendation.recommendedIso) >= ISO_DEADBAND
+                || Math.abs(candidate.recommendedExposureTime - lastEmittedRecommendation.recommendedExposureTime) >= EXPOSURE_DEADBAND_NS
+                || Math.abs(candidate.currentSceneBV - lastEmittedRecommendation.currentSceneBV) >= BV_DEADBAND;
     }
-    
-    @Override
-    public void onCameraDisconnected() {
-        Log.d(TAG, "Camera disconnected");
-        view.showError("相机连接已断开");
-        
-        AppState appState = model.getAppState();
-        appState.setCameraStatus("相机已断开");
-        model.updateAppState(appState);
-        view.updateCameraStatus(appState.getCameraStatus());
+
+    private CameraModel.ExposureRecommendation analyzeExposureRecommendation(ImageProxy image) {
+        if (!(model instanceof CameraModel)) return null;
+        return ((CameraModel) model).analyzeFrameForAutoExposure(image);
     }
-    
-    @Override
-    public void onCameraError(int error) {
-        Log.e(TAG, "Camera error: " + error);
-        String errorMsg = getCameraErrorMessage(error);
-        view.showError(errorMsg);
-        
-        AppState appState = model.getAppState();
-        appState.setCameraStatus("相机错误");
-        appState.setLastError(errorMsg);
-        model.updateAppState(appState);
-        view.updateCameraStatus(appState.getCameraStatus());
-    }
-    
-    @Override
-    public void onImageCaptured(byte[] imageData) {
-        Log.d(TAG, "Image captured, processing...");
-        
-        // 保存原始图像
-        String originalFileName = System.currentTimeMillis() + "_original.jpg";
-        boolean saved = model.saveImage(imageData, originalFileName);
-        
-        if (saved) {
-            // 生成伪彩色图像
-            Bitmap originalBitmap = BitmapFactory.decodeByteArray(imageData, 0, imageData.length);
-            if (originalBitmap != null) {
-                // 读取EXIF数据（这里简化处理）
-                String exifBrightness = "N/A";
-                
-                Bitmap pseudoColorBitmap = model.createPseudoColorImage(originalBitmap, exifBrightness);
-                if (pseudoColorBitmap != null) {
-                    view.displayCapturedImage(pseudoColorBitmap);
-                    
-                    // 保存伪彩色图像
-                    String pseudoFileName = System.currentTimeMillis() + "_pseudo.jpg";
-                    model.saveImage(pseudoColorBitmap, pseudoFileName);
-                    
-                    view.showToast("图像处理完成并已保存");
-                }
+
+    private void handleExposureRecommendation(CameraModel.ExposureRecommendation recommendation) {
+        lastRecommendation = recommendation;
+        if (shouldEmitRecommendation(recommendation)) {
+            lastEmittedRecommendation = recommendation;
+            if (!isManualModeActive() && !aeLocked) {
+                view.onExposureRecommendationChanged(recommendation);
             }
-            
-            // 更新拍照计数
-            takePicture();
+        }
+        maybeAutoApplyFromAnalyzer(recommendation);
+    }
+
+    public void applyLatestExposureRecommendation() {
+        applyLatestExposureRecommendationWithRatio(APPLY_SMOOTHING, false);
+    }
+
+    public void applyLatestExposureRecommendationInAutoMode() {
+        applyLatestExposureRecommendationWithRatio(autoTuneState.stepRatio, true);
+    }
+
+    private void applyLatestExposureRecommendationWithRatio(double ratio, boolean forcePreviewSafeRange) {
+        if (lastRecommendation == null) return;
+        CameraSettings settings = model.getCameraSettings();
+        Range<Integer> isoRange = settings.getIsoRange();
+        Range<Long> exposureRange = settings.getExposureRange();
+        if (isoRange == null || exposureRange == null) return;
+
+        double safeRatio = Math.max(0.0, Math.min(1.0, ratio));
+        int smoothedIso = (int) Math.round(
+                settings.getIso() + (lastRecommendation.recommendedIso - settings.getIso()) * safeRatio);
+        long smoothedExposure = Math.round(
+                settings.getExposureTime() + (lastRecommendation.recommendedExposureTime - settings.getExposureTime()) * safeRatio);
+        smoothedIso = Math.max(isoRange.getLower(), Math.min(isoRange.getUpper(), smoothedIso));
+        smoothedExposure = Math.max(exposureRange.getLower(), Math.min(exposureRange.getUpper(), smoothedExposure));
+        if (forcePreviewSafeRange) {
+            smoothedIso = Math.max(PREVIEW_SAFE_MIN_ISO, Math.min(PREVIEW_SAFE_MAX_ISO, smoothedIso));
+            smoothedExposure = Math.max(PREVIEW_SAFE_MIN_EXPOSURE_NS,
+                    Math.min(PREVIEW_SAFE_MAX_EXPOSURE_NS, smoothedExposure));
+        }
+
+        int isoProgress = toProgressInt(
+                smoothedIso, isoRange.getLower(), isoRange.getUpper());
+        int exposureProgress = toProgressLong(
+                smoothedExposure,
+                exposureRange.getLower(),
+                exposureRange.getUpper()
+        );
+
+        settings.setIso(smoothedIso);
+        settings.setExposureTime(smoothedExposure);
+        model.updateCameraSettings(settings);
+
+        view.setSeekBarProgress(R.id.seekBarBrightness, 0);
+        view.setSeekBarProgress(R.id.seekBarIso, isoProgress);
+        view.setSeekBarProgress(R.id.seekBarExposure, exposureProgress);
+        view.updateIsoDisplay(smoothedIso);
+        view.updateExposureDisplay(formatExposureTime(smoothedExposure));
+        view.applyCameraIsoParameter(smoothedIso);
+        view.applyCameraExposureParameter(smoothedExposure);
+        updateExposureValueDisplay(settings);
+    }
+
+    public void onUserManualAdjustmentStarted() {
+        manualModeUntilMs = System.currentTimeMillis() + MANUAL_MODE_HOLD_MS;
+        resetAutoTuneStability();
+    }
+
+    public boolean isManualModeActive() {
+        return System.currentTimeMillis() < manualModeUntilMs;
+    }
+
+    public boolean toggleAELock() {
+        aeLocked = !aeLocked;
+        return aeLocked;
+    }
+
+    public void setDeferHardwareApply(boolean deferHardwareApply) {
+        this.deferHardwareApply = deferHardwareApply;
+    }
+
+    // -------------------------------------------------------------------------
+    // Auto Tune Controls
+    // -------------------------------------------------------------------------
+
+    public boolean toggleAutoTune() {
+        autoTuneState.enabled = !autoTuneState.enabled;
+        if (!autoTuneState.enabled) {
+            resetAutoTuneStability();
+        }
+        return autoTuneState.enabled;
+    }
+
+    public boolean isAutoTuneEnabled() {
+        return autoTuneState.enabled;
+    }
+
+    public void setAutoApplyStableFrameCount(int stableFrameCount) {
+        if (stableFrameCount < 1) {
+            stableFrameCount = AUTO_APPLY_STABLE_FRAME_COUNT_DEFAULT;
+        }
+        autoTuneState.requiredStableFrameCount = stableFrameCount;
+        resetAutoTuneStability();
+    }
+
+    public int getAutoApplyStableFrameCount() {
+        return autoTuneState.requiredStableFrameCount;
+    }
+
+    public void setAutoApplyStepRatio(double stepRatio) {
+        if (stepRatio <= 0.0 || stepRatio > 1.0) {
+            stepRatio = AUTO_APPLY_STEP_RATIO_DEFAULT;
+        }
+        autoTuneState.stepRatio = stepRatio;
+    }
+
+    public double getAutoApplyStepRatio() {
+        return autoTuneState.stepRatio;
+    }
+
+    public void setAutoApplyBvDeltaThreshold(double threshold) {
+        if (threshold <= 0.0) {
+            threshold = AUTO_APPLY_BV_DELTA_THRESHOLD_DEFAULT;
+        }
+        autoTuneState.bvDeltaThreshold = threshold;
+        resetAutoTuneStability();
+    }
+
+    public double getAutoApplyBvDeltaThreshold() {
+        return autoTuneState.bvDeltaThreshold;
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal Helpers
+    // -------------------------------------------------------------------------
+
+    private int toProgressInt(int value, int min, int max) {
+        if (max <= min) return 0;
+        float ratio = (value - min) * 1f / (max - min);
+        return Math.max(0, Math.min(SEEK_MAX, Math.round(ratio * SEEK_MAX)));
+    }
+
+    private int toProgressLong(long value, long min, long max) {
+        if (max <= min) return 0;
+        double ratio = (value - min) * 1.0 / (max - min);
+        return Math.max(0, Math.min(SEEK_MAX, (int) Math.round(ratio * SEEK_MAX)));
+    }
+
+    private void maybeAutoApplyFromAnalyzer(CameraModel.ExposureRecommendation recommendation) {
+        if (!autoTuneState.enabled || recommendation == null || isManualModeActive() || aeLocked) return;
+        double bvDelta = recommendation.targetBV - recommendation.currentSceneBV;
+        if (Math.abs(bvDelta) < autoTuneState.bvDeltaThreshold) {
+            resetAutoTuneStability();
+            return;
+        }
+
+        int direction = bvDelta > 0 ? 1 : -1;
+        if (direction == autoTuneState.lastDirection) {
+            autoTuneState.stableFrameCount++;
         } else {
-            view.showError("图像保存失败");
+            autoTuneState.lastDirection = direction;
+            autoTuneState.stableFrameCount = 1;
         }
+        if (autoTuneState.stableFrameCount < autoTuneState.requiredStableFrameCount) return;
+
+        long now = System.currentTimeMillis();
+        if (now - autoTuneState.lastAutoApplyTs < AUTO_APPLY_MIN_INTERVAL_MS) return;
+        autoTuneState.lastAutoApplyTs = now;
+        resetAutoTuneStability();
+        view.requestAutoApplyRecommendation();
     }
-    
-    /**
-     * 更新参数显示
-     */
-    private void updateParameterDisplays() {
-        CameraSettings settings = model.getCameraSettings();
-        AppState appState = model.getAppState();
-        
-        view.updateIsoDisplay(settings.getIso());
-        view.updateExposureDisplay(settings.getFormattedExposureTime());
-        view.updateBrightnessMode(appState.getBrightnessMode().getDisplayName());
-        updateExposureValueDisplay();
-    }
-    
-    /**
-     * 更新曝光量显示
-     */
-    private void updateExposureValueDisplay() {
-        CameraSettings settings = model.getCameraSettings();
-        double exposureValue = settings.calculateExposureValue();
-        view.updateExposureValue(String.format("E: %.2f", exposureValue));
-    }
-    
-    /**
-     * 获取相机错误信息
-     */
-    private String getCameraErrorMessage(int error) {
-        switch (error) {
-            case CameraDevice.StateCallback.ERROR_CAMERA_IN_USE:
-                return "相机正被其他应用使用";
-            case CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE:
-                return "已达到最大相机使用数量";
-            case CameraDevice.StateCallback.ERROR_CAMERA_DISABLED:
-                return "相机已被禁用";
-            case CameraDevice.StateCallback.ERROR_CAMERA_DEVICE:
-                return "相机设备发生错误";
-            case CameraDevice.StateCallback.ERROR_CAMERA_SERVICE:
-                return "相机服务发生错误";
-            default:
-                return "未知相机错误";
-        }
+
+    private void resetAutoTuneStability() {
+        autoTuneState.lastDirection = 0;
+        autoTuneState.stableFrameCount = 0;
     }
 }

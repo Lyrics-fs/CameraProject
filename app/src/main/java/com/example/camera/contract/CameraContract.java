@@ -3,6 +3,7 @@ package com.example.camera.contract;
 import android.graphics.Bitmap;
 import com.example.camera.model.CameraSettings;
 import com.example.camera.model.AppState;
+import com.example.camera.model.CameraModel;
 
 /**
  * MVP模式的契约接口
@@ -26,6 +27,8 @@ public interface CameraContract {
         void updateExposureDisplay(String exposureText);
         void updateBrightnessMode(String mode);
         void updateExposureValue(String exposureValue);
+        void onExposureRecommendationChanged(CameraModel.ExposureRecommendation recommendation);
+        void requestAutoApplyRecommendation();
         
         // SeekBar控制
         void resetSeekBars();
@@ -37,6 +40,7 @@ public interface CameraContract {
         // 相机参数实际更新（直接操作相机硬件）
         void applyCameraIsoParameter(int iso);
         void applyCameraExposureParameter(long exposure);
+        void setPreviewBrightness(float gain);
         
         // 获取当前进度值
         int getIsoProgress();

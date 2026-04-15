@@ -2,7 +2,6 @@ package com.example.camera.model;
 
 import android.content.Context;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -10,13 +9,17 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Shader;
 import android.os.Environment;
+import android.util.Range;
 import android.util.Log;
+
+import androidx.camera.core.ImageProxy;
 
 import com.example.camera.contract.CameraContract;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 /**
  * 数据层Model实现
@@ -24,6 +27,15 @@ import java.io.IOException;
  */
 public class CameraModel implements CameraContract.Model {
     private static final String TAG = "CameraModel";
+    private static final double DEFAULT_TARGET_BV = -2.47; // log2(0.18), 中灰参考
+    private static final int LUMA_SAMPLE_STEP = 4;
+    private static final int DEFAULT_ISO = 100;
+    private static final long DEFAULT_EXPOSURE_NS = 10_000_000L; // 10ms
+    private static final double MAX_BV_STEP = 1.0; // 每次分析最多调整 1 档
+    private static final int PREVIEW_SAFE_MIN_ISO = 100;
+    private static final int PREVIEW_SAFE_MAX_ISO = 800;
+    private static final long PREVIEW_SAFE_MIN_EXPOSURE_NS = 2_000_000L;   // 2ms
+    private static final long PREVIEW_SAFE_MAX_EXPOSURE_NS = 33_000_000L;  // ~1/30s
     
     private CameraSettings cameraSettings;
     private AppState appState;
@@ -33,6 +45,26 @@ public class CameraModel implements CameraContract.Model {
         this.context = context;
         this.cameraSettings = new CameraSettings();
         this.appState = new AppState();
+    }
+
+    /**
+     * 自动曝光推荐结果。
+     */
+    public static class ExposureRecommendation {
+        public final int recommendedIso;
+        public final long recommendedExposureTime;
+        public final double targetBV;
+        public final double currentSceneBV;
+
+        public ExposureRecommendation(int recommendedIso,
+                                      long recommendedExposureTime,
+                                      double targetBV,
+                                      double currentSceneBV) {
+            this.recommendedIso = recommendedIso;
+            this.recommendedExposureTime = recommendedExposureTime;
+            this.targetBV = targetBV;
+            this.currentSceneBV = currentSceneBV;
+        }
     }
     
     @Override
@@ -70,9 +102,83 @@ public class CameraModel implements CameraContract.Model {
             return String.format("%.2fms", exposureMs);
         }
     }
+
+    /**
+     * 对预览帧进行自动曝光分析，返回推荐的 ISO/曝光时间组合。
+     * 说明：
+     * 1) 仅采样 Y 通道，降低实时计算开销；
+     * 2) 采用先调整曝光时间、再调整 ISO 的策略；
+     * 3) 目标 BV 默认使用中灰参考值 -2.47（log2(0.18)）。
+     */
+    public ExposureRecommendation analyzeFrameForAutoExposure(ImageProxy image) {
+        if (image == null || image.getPlanes().length == 0) {
+            int fallbackIso = getCurrentOrDefaultIso();
+            long fallbackExposure = getCurrentOrDefaultExposureTime();
+            return new ExposureRecommendation(
+                    fallbackIso, fallbackExposure, DEFAULT_TARGET_BV, DEFAULT_TARGET_BV);
+        }
+
+        ImageProxy.PlaneProxy yPlane = image.getPlanes()[0];
+        ByteBuffer yBuffer = yPlane.getBuffer().duplicate();
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int rowStride = yPlane.getRowStride();
+        int pixelStride = yPlane.getPixelStride();
+
+        long sumLuma = 0L;
+        int sampleCount = 0;
+        int rowStep = Math.max(1, LUMA_SAMPLE_STEP);
+        int colStep = Math.max(1, LUMA_SAMPLE_STEP);
+
+        for (int y = 0; y < height; y += rowStep) {
+            int rowStart = y * rowStride;
+            for (int x = 0; x < width; x += colStep) {
+                int index = rowStart + x * pixelStride;
+                if (index >= 0 && index < yBuffer.limit()) {
+                    sumLuma += (yBuffer.get(index) & 0xFF);
+                    sampleCount++;
+                }
+            }
+        }
+
+        double averageLuma = sampleCount > 0 ? (sumLuma * 1.0 / sampleCount) : 128.0;
+        double currentSceneBV = calculateBVFromLuminance(averageLuma);
+        double targetBV = DEFAULT_TARGET_BV;
+        double rawBvDelta = targetBV - currentSceneBV;
+        double bvDelta = clampDouble(rawBvDelta, -MAX_BV_STEP, MAX_BV_STEP);
+
+        int baseIso = getCurrentOrDefaultIso();
+        long baseExposure = getCurrentOrDefaultExposureTime();
+        double evFactor = Math.pow(2.0, bvDelta);
+
+        Range<Long> exposureRange = cameraSettings.getExposureRange();
+        Range<Integer> isoRange = cameraSettings.getIsoRange();
+
+        long minExposure = exposureRange != null ? exposureRange.getLower() : 100_000L;
+        long maxExposure = exposureRange != null ? exposureRange.getUpper() : 100_000_000L;
+        int minIso = isoRange != null ? isoRange.getLower() : 100;
+        int maxIso = isoRange != null ? isoRange.getUpper() : 3200;
+
+        // 预览期使用保守范围，避免“推荐值一键应用后变黑/卡顿”。
+        minExposure = Math.max(minExposure, PREVIEW_SAFE_MIN_EXPOSURE_NS);
+        maxExposure = Math.min(maxExposure, PREVIEW_SAFE_MAX_EXPOSURE_NS);
+        minIso = Math.max(minIso, PREVIEW_SAFE_MIN_ISO);
+        maxIso = Math.min(maxIso, PREVIEW_SAFE_MAX_ISO);
+
+        long recommendedExposure = clampLong((long) (baseExposure * evFactor), minExposure, maxExposure);
+        double usedExposureFactor = Math.max(1e-6, recommendedExposure * 1.0 / Math.max(1L, baseExposure));
+        double remainFactor = evFactor / usedExposureFactor;
+        int recommendedIso = clampInt((int) Math.round(baseIso * remainFactor), minIso, maxIso);
+
+        return new ExposureRecommendation(recommendedIso, recommendedExposure, targetBV, currentSceneBV);
+    }
     
     @Override
     public Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness) {
+        return createPseudoColorImage(originalBitmap, exifBrightness, 0);
+    }
+
+    public Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness, int rotationDegrees) {
         if (originalBitmap == null) return null;
         
         int width = originalBitmap.getWidth();
@@ -104,11 +210,16 @@ public class CameraModel implements CameraContract.Model {
 
         Bitmap pseudoBitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
 
-        // 旋转图像
-        Matrix rotateMatrix = new Matrix();
-        rotateMatrix.postRotate(90);
-        Bitmap rotatedPseudoBitmap = Bitmap.createBitmap(pseudoBitmap, 0, 0, width, height, rotateMatrix, true);
-        pseudoBitmap.recycle();
+        // 根据拍照帧方向动态旋转，避免结果图与原图方向不一致。
+        Bitmap rotatedPseudoBitmap;
+        if (rotationDegrees % 360 == 0) {
+            rotatedPseudoBitmap = pseudoBitmap;
+        } else {
+            Matrix rotateMatrix = new Matrix();
+            rotateMatrix.postRotate(rotationDegrees);
+            rotatedPseudoBitmap = Bitmap.createBitmap(pseudoBitmap, 0, 0, width, height, rotateMatrix, true);
+            pseudoBitmap.recycle();
+        }
         
         // 添加图例和信息
         return addLegendAndInfo(rotatedPseudoBitmap, originalBitmap, exifBrightness);
@@ -308,5 +419,33 @@ public class CameraModel implements CameraContract.Model {
             Log.e(TAG, "Failed to save bitmap", e);
             return false;
         }
+    }
+
+    private double calculateBVFromLuminance(double averageLuma) {
+        // 使用归一化亮度近似 BV，避免 log(0)。
+        double normalized = Math.max(averageLuma / 255.0, 1e-4);
+        return Math.log(normalized) / Math.log(2);
+    }
+
+    private int getCurrentOrDefaultIso() {
+        int iso = cameraSettings.getIso();
+        return iso > 0 ? iso : DEFAULT_ISO;
+    }
+
+    private long getCurrentOrDefaultExposureTime() {
+        long exposure = cameraSettings.getExposureTime();
+        return exposure > 0 ? exposure : DEFAULT_EXPOSURE_NS;
+    }
+
+    private int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private long clampLong(long value, long min, long max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private double clampDouble(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 }

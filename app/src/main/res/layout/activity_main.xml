@@ -77,8 +77,121 @@
 
             </LinearLayout>
 
+            <!-- ── 统一状态/错误区（含重试） ── -->
+            <LinearLayout
+                android:id="@+id/status_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/card_background"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="12dp">
+
+                <TextView
+                    android:id="@+id/tv_status"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="状态: 初始化中..."
+                    android:textColor="@color/status_text"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btn_retry"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="重试"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_auto_exposure_recommendation"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/card_background"
+                android:padding="12dp"
+                android:text="推荐 ISO: --, 曝光: -- ms, BV: --"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btn_mode_toggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:text="切换到推荐模式"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/btn_apply_recommendation"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:text="应用推荐值"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/btn_toggle_advanced_tuning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:text="高级参数: 展开"
+                android:textAllCaps="false" />
+
+            <LinearLayout
+                android:id="@+id/advanced_tuning_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <Button
+                    android:id="@+id/btn_auto_tune"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="自动微调: 关"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/btn_stable_frames"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="稳定帧: 3"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/btn_auto_step_ratio"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="自动步进: 25%"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/btn_bv_threshold"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="BV阈值: 0.20"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/btn_ae_lock"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="锁定当前推荐值"
+                    android:textAllCaps="false" />
+            </LinearLayout>
+
             <!-- ── 参数控制卡片 ── -->
             <LinearLayout
+                android:id="@+id/manual_controls_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="14dp"

@@ -10,17 +10,21 @@ import org.junit.runner.RunWith;
 
 import static org.junit.Assert.*;
 
-/**
- * Instrumented test, which will execute on an Android device.
- *
- * @see <a href="http://d.android.com/tools/testing">Testing documentation</a>
- */
 @RunWith(AndroidJUnit4.class)
 public class ExampleInstrumentedTest {
+
     @Test
-    public void useAppContext() {
-        // Context of the app under test.
+    public void appContext_packageName_matchesBuildConfig() {
         Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("com.example.myapplication", appContext.getPackageName());
+        assertEquals(BuildConfig.APPLICATION_ID, appContext.getPackageName());
+    }
+
+    @Test
+    public void appContext_canResolveCoreViewIds() {
+        Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertNotEquals(0, appContext.getResources().getIdentifier(
+                "gl_surface_view", "id", appContext.getPackageName()));
+        assertNotEquals(0, appContext.getResources().getIdentifier(
+                "btn_retry", "id", appContext.getPackageName()));
     }
 }
