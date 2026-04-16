@@ -15,6 +15,8 @@ import android.util.Log;
 import androidx.camera.core.ImageProxy;
 
 import com.example.camera.contract.CameraContract;
+import com.example.camera.data.CalibrationRepository;
+import com.example.camera.model.calibration.CurveParams;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -39,12 +41,16 @@ public class CameraModel implements CameraContract.Model {
     
     private CameraSettings cameraSettings;
     private AppState appState;
-    private Context context;
+    private final CalibrationRepository calibrationRepository;
+    private CurveParams activeCurveParams;
     
     public CameraModel(Context context) {
-        this.context = context;
         this.cameraSettings = new CameraSettings();
         this.appState = new AppState();
+        this.calibrationRepository = context != null ? new CalibrationRepository(context) : null;
+        this.activeCurveParams = calibrationRepository != null
+                ? calibrationRepository.loadCurveParams()
+                : CurveParams.prior();
     }
 
     /**
@@ -269,7 +275,7 @@ public class CameraModel implements CameraContract.Model {
         
         double Lcenter;
         if (!Float.isNaN(bv)) {
-            Lcenter = 2.9 * Math.exp(0.729 * bv);
+            Lcenter = computeLFromBv(bv, activeCurveParams);
         } else {
             Lcenter = yValue / 255.0 * 400 + 50;
         }
@@ -363,8 +369,9 @@ public class CameraModel implements CameraContract.Model {
 
         String lResult;
         if (!Float.isNaN(bv)) {
-            double L = 2.9 * Math.exp(0.729 * bv);
-            lResult = String.format("L = 2.9 × exp(0.729×BV) = %.2f", L);
+            double L = computeLFromBv(bv, activeCurveParams);
+            CurveParams curve = activeCurveParams != null ? activeCurveParams : CurveParams.prior();
+            lResult = String.format("L = %.3f × exp(%.3f×BV) = %.2f", curve.a, curve.b, L);
         } else {
             lResult = "L = N/A";
         }
@@ -447,5 +454,38 @@ public class CameraModel implements CameraContract.Model {
 
     private double clampDouble(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    public double computeLFromBv(float bv, CurveParams params) {
+        CurveParams effective = params != null && params.isValid() ? params : CurveParams.prior();
+        return effective.a * Math.exp(effective.b * bv);
+    }
+
+    public CurveParams getActiveCurveParams() {
+        return activeCurveParams;
+    }
+
+    public void setActiveCurveParams(CurveParams params) {
+        CurveParams effective = params != null && params.isValid() ? params : CurveParams.prior();
+        activeCurveParams = effective;
+        if (calibrationRepository != null) {
+            calibrationRepository.saveCurveParams(effective);
+        }
+    }
+
+    public String getCurveSourceLabel() {
+        return activeCurveParams != null && activeCurveParams.source == CurveParams.Source.CALIBRATED
+                ? "已标定"
+                : "先验";
+    }
+
+    public void saveCalibrationSummary(String summary) {
+        if (calibrationRepository != null) {
+            calibrationRepository.saveLastSessionSummary(summary);
+        }
+    }
+
+    public String getCalibrationSummary() {
+        return calibrationRepository != null ? calibrationRepository.loadLastSessionSummary() : "";
     }
 }

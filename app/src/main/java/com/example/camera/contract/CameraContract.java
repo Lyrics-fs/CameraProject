@@ -29,6 +29,8 @@ public interface CameraContract {
         void updateExposureValue(String exposureValue);
         void onExposureRecommendationChanged(CameraModel.ExposureRecommendation recommendation);
         void requestAutoApplyRecommendation();
+        void updateCalibrationStatus(String text);
+        void updateCurveSource(String source);
         
         // SeekBar控制
         void resetSeekBars();
@@ -80,6 +82,12 @@ public interface CameraContract {
         
         // 图像处理
         void onImageCaptured(byte[] imageData);
+
+        // 标定流程
+        void startCalibration();
+        void captureCalibrationSample();
+        void finishCalibration();
+        boolean isCalibrationModeActive();
     }
     
     /**

@@ -13,8 +13,15 @@ import com.example.camera.contract.CameraContract;
 import com.example.camera.model.AppState;
 import com.example.camera.model.CameraModel;
 import com.example.camera.model.CameraSettings;
+import com.example.camera.model.calibration.CalibrationSample;
+import com.example.camera.model.calibration.CalibrationSession;
+import com.example.camera.model.calibration.CalibrationFitter;
+import com.example.camera.model.calibration.CurveParams;
 import com.example.camera.presenter.state.AutoTuneState;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -40,6 +47,11 @@ public class CameraPresenter implements CameraContract.Presenter {
     private static final int PREVIEW_SAFE_MAX_ISO = 800;
     private static final long PREVIEW_SAFE_MIN_EXPOSURE_NS = 2_000_000L;
     private static final long PREVIEW_SAFE_MAX_EXPOSURE_NS = 33_000_000L;
+    private static final int CALIBRATION_MIN_SAMPLES = 8;
+    private static final long CALIBRATION_SAMPLE_INTERVAL_MS = 700L;
+    private static final double CALIBRATION_MIN_BV_SPREAD = 0.5;
+    private static final int CALIBRATION_STABILITY_WINDOW = 8;
+    private static final double CALIBRATION_STABILITY_STD_MAX = 2.0;
     private final CameraContract.View view;
     private final CameraContract.Model model;
     private final ExecutorService analysisExecutor = Executors.newSingleThreadExecutor();
@@ -50,6 +62,12 @@ public class CameraPresenter implements CameraContract.Presenter {
     private long manualModeUntilMs = 0L;
     private boolean aeLocked = false;
     private boolean deferHardwareApply = false;
+    private boolean calibrationModeActive = false;
+    private final CalibrationSession calibrationSession = new CalibrationSession();
+    private final Deque<Double> recentMeanY = new ArrayDeque<>();
+    private double latestMeanY = Double.NaN;
+    private double latestSceneBv = Double.NaN;
+    private long lastCalibrationSampleTs = 0L;
     private final AutoTuneState autoTuneState = new AutoTuneState(
             AUTO_APPLY_STABLE_FRAME_COUNT_DEFAULT,
             AUTO_APPLY_STEP_RATIO_DEFAULT,
@@ -78,6 +96,9 @@ public class CameraPresenter implements CameraContract.Presenter {
         view.updateCameraStatus(appState.getCameraStatus());
         view.updatePhotoCount(appState.getPhotoCount());
         view.updateExposureValue("E = --");
+        view.updateCurveSource(getCurveSourceLabel());
+        String summary = getModel().getCalibrationSummary();
+        view.updateCalibrationStatus(summary.isEmpty() ? "标定模式未开始" : summary);
     }
 
     @Override public void onResume() {}
@@ -85,6 +106,8 @@ public class CameraPresenter implements CameraContract.Presenter {
     @Override
     public void onPause() {
         closeCamera();
+        calibrationModeActive = false;
+        calibrationSession.setStatus(CalibrationSession.Status.IDLE);
     }
 
     @Override
@@ -177,7 +200,10 @@ public class CameraPresenter implements CameraContract.Presenter {
         imageAnalysis.setAnalyzer(analysisExecutor, image -> {
             try {
                 CameraModel.ExposureRecommendation recommendation = analyzeExposureRecommendation(image);
+                latestMeanY = estimateMeanLuma(image);
                 if (recommendation != null) {
+                    latestSceneBv = recommendation.currentSceneBV;
+                    updateStability(latestMeanY);
                     handleExposureRecommendation(recommendation);
                 }
             } finally {
@@ -483,5 +509,142 @@ public class CameraPresenter implements CameraContract.Presenter {
     private void resetAutoTuneStability() {
         autoTuneState.lastDirection = 0;
         autoTuneState.stableFrameCount = 0;
+    }
+
+    @Override
+    public void startCalibration() {
+        calibrationModeActive = true;
+        calibrationSession.clear();
+        calibrationSession.setStatus(CalibrationSession.Status.SAMPLING);
+        lastCalibrationSampleTs = 0L;
+        recentMeanY.clear();
+        view.updateCalibrationStatus("标定中：请对准灰卡并点击“采样”至少8次，建议缓慢调整曝光后再采样");
+    }
+
+    @Override
+    public void captureCalibrationSample() {
+        if (!calibrationModeActive) {
+            view.updateCalibrationStatus("请先开始标定");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastCalibrationSampleTs < CALIBRATION_SAMPLE_INTERVAL_MS) {
+            view.updateCalibrationStatus("采样过快，请稍等再采样");
+            return;
+        }
+        lastCalibrationSampleTs = now;
+        if (!Double.isFinite(latestSceneBv) || !Double.isFinite(latestMeanY)) {
+            view.updateCalibrationStatus("当前帧数据无效，请稍后重试");
+            return;
+        }
+        boolean stable = isFrameStable();
+        boolean validExposure = latestMeanY > 12 && latestMeanY < 245;
+        boolean valid = stable && validExposure;
+        double referenceL = Math.max(1.0, latestMeanY / 255.0 * 100.0);
+        CalibrationSample sample = new CalibrationSample(
+                latestSceneBv,
+                referenceL,
+                latestMeanY,
+                now,
+                valid
+        );
+        calibrationSession.addSample(sample);
+        int validCount = calibrationSession.getValidSampleCount();
+        String quality = !stable ? "抖动" : (validExposure ? "有效" : "过曝/欠曝");
+        view.updateCalibrationStatus("采样完成: " + validCount + "/" + CALIBRATION_MIN_SAMPLES + "，质量=" + quality);
+    }
+
+    @Override
+    public void finishCalibration() {
+        if (!calibrationModeActive) {
+            view.updateCalibrationStatus("当前不在标定模式");
+            return;
+        }
+        calibrationSession.setStatus(CalibrationSession.Status.FITTING);
+        CurveParams fitted = fitCurveParams(calibrationSession.getSamples());
+        if (fitted == null || !fitted.isValid()) {
+            calibrationSession.setStatus(CalibrationSession.Status.FAILED);
+            calibrationSession.setFailReason("样本不足或分布不够，拟合失败");
+            view.updateCalibrationStatus("标定失败：样本不足或变化范围过小");
+            return;
+        }
+        calibrationSession.setStatus(CalibrationSession.Status.DONE);
+        calibrationSession.setFittedParams(fitted);
+        getModel().setActiveCurveParams(fitted);
+        String summary = String.format(
+                "标定完成: a=%.4f, b=%.4f, 样本=%d",
+                fitted.a, fitted.b, calibrationSession.getValidSampleCount());
+        getModel().saveCalibrationSummary(summary);
+        view.updateCurveSource(getCurveSourceLabel());
+        view.updateCalibrationStatus(summary);
+        calibrationModeActive = false;
+    }
+
+    @Override
+    public boolean isCalibrationModeActive() {
+        return calibrationModeActive;
+    }
+
+    private CurveParams fitCurveParams(List<CalibrationSample> samples) {
+        return CalibrationFitter.fitExpCurve(samples, CALIBRATION_MIN_SAMPLES, CALIBRATION_MIN_BV_SPREAD);
+    }
+
+    private double estimateMeanLuma(ImageProxy image) {
+        if (image == null || image.getPlanes().length == 0) return Double.NaN;
+        ImageProxy.PlaneProxy yPlane = image.getPlanes()[0];
+        java.nio.ByteBuffer yBuffer = yPlane.getBuffer().duplicate();
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int rowStride = yPlane.getRowStride();
+        int pixelStride = yPlane.getPixelStride();
+        int startX = width / 4;
+        int endX = width * 3 / 4;
+        int startY = height / 4;
+        int endY = height * 3 / 4;
+        long sum = 0L;
+        int count = 0;
+        for (int y = startY; y < endY; y += 2) {
+            int rowStart = y * rowStride;
+            for (int x = startX; x < endX; x += 2) {
+                int index = rowStart + x * pixelStride;
+                if (index >= 0 && index < yBuffer.limit()) {
+                    sum += (yBuffer.get(index) & 0xFF);
+                    count++;
+                }
+            }
+        }
+        return count > 0 ? (sum * 1.0 / count) : Double.NaN;
+    }
+
+    private void updateStability(double meanY) {
+        if (!Double.isFinite(meanY)) return;
+        recentMeanY.addLast(meanY);
+        while (recentMeanY.size() > CALIBRATION_STABILITY_WINDOW) {
+            recentMeanY.removeFirst();
+        }
+    }
+
+    private boolean isFrameStable() {
+        if (recentMeanY.size() < 4) return false;
+        double mean = 0.0;
+        for (double value : recentMeanY) mean += value;
+        mean /= recentMeanY.size();
+        double variance = 0.0;
+        for (double value : recentMeanY) {
+            double diff = value - mean;
+            variance += diff * diff;
+        }
+        variance /= recentMeanY.size();
+        return Math.sqrt(variance) <= CALIBRATION_STABILITY_STD_MAX;
+    }
+
+    private CameraModel getModel() {
+        return (CameraModel) model;
+    }
+
+    private String getCurveSourceLabel() {
+        CurveParams params = getModel().getActiveCurveParams();
+        return getModel().getCurveSourceLabel()
+                + String.format(" (a=%.3f, b=%.3f)", params.a, params.b);
     }
 }

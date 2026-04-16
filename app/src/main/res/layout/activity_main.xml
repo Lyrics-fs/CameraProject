@@ -117,6 +117,65 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/card_background"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:id="@+id/tv_curve_source"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="曲线来源: 先验"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_calibration_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="标定模式未开始"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_start_calibration"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="开始标定"
+                        android:textAllCaps="false" />
+
+                    <Button
+                        android:id="@+id/btn_capture_calibration"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:text="采样"
+                        android:textAllCaps="false" />
+
+                    <Button
+                        android:id="@+id/btn_finish_calibration"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:text="完成拟合"
+                        android:textAllCaps="false" />
+                </LinearLayout>
+            </LinearLayout>
+
             <Button
                 android:id="@+id/btn_mode_toggle"
                 android:layout_width="match_parent"

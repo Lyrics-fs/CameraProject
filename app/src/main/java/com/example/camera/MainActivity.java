@@ -79,6 +79,8 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private TextView tvBrightnessLabel;
     private TextView tvStatus;
     private TextView tvAutoExposureRecommendation;
+    private TextView tvCalibrationStatus;
+    private TextView tvCurveSource;
     private Button btnRetry;
     private Button btnModeToggle;
     private Button btnApplyRecommendation;
@@ -88,6 +90,9 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private Button btnAutoStepRatio;
     private Button btnBvThreshold;
     private Button btnAELock;
+    private Button btnStartCalibration;
+    private Button btnCaptureCalibration;
+    private Button btnFinishCalibration;
     private LinearLayout manualControlsContainer;
     private LinearLayout advancedTuningContainer;
     private SeekBar seekBarBrightness, seekBarIso, seekBarExposure;
@@ -102,11 +107,13 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private ImageAnalysis imageAnalysis;
     private Preview preview;
     private android.view.Surface previewSurface;
+    private SurfaceTexture boundSurfaceTexture;
     private CameraPresenter presenter;
     private ImageRepository imageRepository;
     private boolean isProgrammaticSeekBarUpdate = false;
     private boolean isRecommendationMode = false;
     private boolean isAdvancedTuningExpanded = false;
+    private boolean isCameraStartPending = false;
 
     // 相机参数（通过 Camera2 Interop 手动控制）
     private android.util.Range<Integer> isoRange;
@@ -153,6 +160,8 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         tvBrightnessLabel = findViewById(R.id.tv_brightness_label);
         tvStatus          = findViewById(R.id.tv_status);
         tvAutoExposureRecommendation = findViewById(R.id.tv_auto_exposure_recommendation);
+        tvCalibrationStatus = findViewById(R.id.tv_calibration_status);
+        tvCurveSource = findViewById(R.id.tv_curve_source);
         btnRetry          = findViewById(R.id.btn_retry);
         btnModeToggle     = findViewById(R.id.btn_mode_toggle);
         btnApplyRecommendation = findViewById(R.id.btn_apply_recommendation);
@@ -162,6 +171,9 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         btnAutoStepRatio  = findViewById(R.id.btn_auto_step_ratio);
         btnBvThreshold    = findViewById(R.id.btn_bv_threshold);
         btnAELock         = findViewById(R.id.btn_ae_lock);
+        btnStartCalibration = findViewById(R.id.btn_start_calibration);
+        btnCaptureCalibration = findViewById(R.id.btn_capture_calibration);
+        btnFinishCalibration = findViewById(R.id.btn_finish_calibration);
         manualControlsContainer = findViewById(R.id.manual_controls_container);
         advancedTuningContainer = findViewById(R.id.advanced_tuning_container);
         seekBarBrightness = findViewById(R.id.seekBarBrightness);
@@ -178,6 +190,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         presenter.onViewCreated();
         loadRecommendationPrefs();
         updateControlModeUI();
+        updateCalibrationButtons();
         setupPreviewLayoutOnce();
         requestCameraPermissionIfNeeded();
     }
@@ -239,6 +252,15 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                 tvAutoExposureRecommendation.setText("已恢复实时推荐");
             }
         });
+        btnStartCalibration.setOnClickListener(v -> {
+            presenter.startCalibration();
+            updateCalibrationButtons();
+        });
+        btnCaptureCalibration.setOnClickListener(v -> presenter.captureCalibrationSample());
+        btnFinishCalibration.setOnClickListener(v -> {
+            presenter.finishCalibration();
+            updateCalibrationButtons();
+        });
     }
 
     private void loadRecommendationPrefs() {
@@ -299,6 +321,8 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     // -------------------------------------------------------------------------
 
     private void startCamera() {
+        if (isCameraStartPending) return;
+        isCameraStartPending = true;
         ListenableFuture<ProcessCameraProvider> future =
                 ProcessCameraProvider.getInstance(this);
         future.addListener(() -> {
@@ -310,26 +334,46 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                     bindCameraPreview(st);
                 }
             } catch (ExecutionException | InterruptedException e) {
+                isCameraStartPending = false;
                 reportError("相机初始化失败，请重试", e, true);
             }
         }, ContextCompat.getMainExecutor(this));
     }
 
     private void bindCameraPreview(SurfaceTexture surfaceTexture) {
-        if (cameraProvider == null) return;
+        if (cameraProvider == null) {
+            isCameraStartPending = false;
+            return;
+        }
+        if (surfaceTexture == null) {
+            isCameraStartPending = false;
+            return;
+        }
+        if (surfaceTexture == boundSurfaceTexture && previewSurface != null && camera != null) {
+            isCameraStartPending = false;
+            return;
+        }
 
         releasePreviewSurface();
         cameraProvider.unbindAll();
 
         // 将 GL SurfaceTexture 包装为 CameraX Preview.SurfaceProvider
         surfaceTexture.setDefaultBufferSize(1280, 720);
-        previewSurface = new android.view.Surface(surfaceTexture);
+        final android.view.Surface requestSurface = new android.view.Surface(surfaceTexture);
+        previewSurface = requestSurface;
+        boundSurfaceTexture = surfaceTexture;
 
         Preview.SurfaceProvider surfaceProvider = request -> {
             android.util.Size resolution = request.getResolution();
             surfaceTexture.setDefaultBufferSize(resolution.getWidth(), resolution.getHeight());
-            request.provideSurface(previewSurface,
-                    ContextCompat.getMainExecutor(this), result -> releasePreviewSurface());
+            request.provideSurface(requestSurface,
+                    ContextCompat.getMainExecutor(this), result -> {
+                        if (previewSurface == requestSurface) {
+                            previewSurface = null;
+                            boundSurfaceTexture = null;
+                        }
+                        requestSurface.release();
+                    });
             // 通知渲染器相机实际分辨率，用于宽高比校正
             // 后置相机传感器为横向，竖屏时宽高需交换
             glSurfaceView.queueEvent(() ->
@@ -348,6 +392,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         CameraSelector selector = CameraSelector.DEFAULT_BACK_CAMERA;
 
         camera = cameraProvider.bindToLifecycle(this, selector, preview, imageCapture, imageAnalysis);
+        isCameraStartPending = false;
         presenter.onCameraOpened();
 
         // 读取相机参数范围（通过 Camera2 Interop）
@@ -359,6 +404,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             previewSurface.release();
             previewSurface = null;
         }
+        boundSurfaceTexture = null;
+        camera = null;
+        imageCapture = null;
+        imageAnalysis = null;
+        preview = null;
     }
 
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -585,6 +635,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         cameraPermissionLauncher.launch(Manifest.permission.CAMERA);
     }
 
+    private boolean hasCameraPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
     private void showPermissionSettingsDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("需要相机权限")
@@ -746,6 +801,13 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         }
     }
 
+    private void updateCalibrationButtons() {
+        boolean active = presenter != null && presenter.isCalibrationModeActive();
+        btnStartCalibration.setEnabled(!active);
+        btnCaptureCalibration.setEnabled(active);
+        btnFinishCalibration.setEnabled(active);
+    }
+
     private void updateAdvancedTuningVisibility() {
         if (!isRecommendationMode) {
             advancedTuningContainer.setVisibility(android.view.View.GONE);
@@ -765,10 +827,20 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     protected void onResume() {
         super.onResume();
         glSurfaceView.onResume();
+        presenter.onResume();
+        if (hasCameraPermission()) {
+            startCamera();
+        }
     }
 
     @Override
     protected void onPause() {
+        mainHandler.removeCallbacks(applyCameraOptionsRunnable);
+        presenter.onPause();
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+        }
+        releasePreviewSurface();
         super.onPause();
         glSurfaceView.onPause();
     }
@@ -851,6 +923,16 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     @Override
     public void requestAutoApplyRecommendation() {
         runOnUiThread(() -> presenter.applyLatestExposureRecommendationInAutoMode());
+    }
+
+    @Override
+    public void updateCalibrationStatus(String text) {
+        runOnUiThread(() -> tvCalibrationStatus.setText(text));
+    }
+
+    @Override
+    public void updateCurveSource(String source) {
+        runOnUiThread(() -> tvCurveSource.setText("曲线来源: " + source));
     }
 
     @Override

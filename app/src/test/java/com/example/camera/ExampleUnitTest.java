@@ -107,6 +107,8 @@ public class ExampleUnitTest {
         @Override public void updateExposureValue(String exposureValue) { lastExposureValue = exposureValue; }
         @Override public void onExposureRecommendationChanged(CameraModel.ExposureRecommendation recommendation) {}
         @Override public void requestAutoApplyRecommendation() {}
+        @Override public void updateCalibrationStatus(String text) {}
+        @Override public void updateCurveSource(String source) {}
         @Override public void resetSeekBars() {}
         @Override
         public void setSeekBarProgress(int seekBarId, int progress) {
