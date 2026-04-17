@@ -10,6 +10,7 @@ import android.util.Log;
 
 import androidx.exifinterface.media.ExifInterface;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -73,6 +74,20 @@ public class ImageRepository {
             String val = exif.getAttribute(ExifInterface.TAG_BRIGHTNESS_VALUE);
             return val != null ? val : "N/A";
         } catch (IOException e) {
+            return "读取失败";
+        }
+    }
+
+    /**
+     * 从内存里的 JPEG bytes 读取亮度 EXIF，避免先写入 MediaStore 再读取带来的 IO 延迟。
+     */
+    public String readExifBrightnessFromBytes(byte[] jpegBytes) {
+        if (jpegBytes == null || jpegBytes.length == 0) return "N/A";
+        try (InputStream inputStream = new ByteArrayInputStream(jpegBytes)) {
+            ExifInterface exif = new ExifInterface(inputStream);
+            String val = exif.getAttribute(ExifInterface.TAG_BRIGHTNESS_VALUE);
+            return val != null ? val : "N/A";
+        } catch (Exception ignore) {
             return "读取失败";
         }
     }

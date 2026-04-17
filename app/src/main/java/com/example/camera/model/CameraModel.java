@@ -38,6 +38,42 @@ public class CameraModel implements CameraContract.Model {
     private static final int PREVIEW_SAFE_MAX_ISO = 800;
     private static final long PREVIEW_SAFE_MIN_EXPOSURE_NS = 2_000_000L;   // 2ms
     private static final long PREVIEW_SAFE_MAX_EXPOSURE_NS = 33_000_000L;  // ~1/30s
+
+    // 伪彩色（Hue）映射：沿用原来的蓝→青→绿→黄→红分段。
+    private static final int[] PSEUDO_R = new int[256];
+    private static final int[] PSEUDO_G = new int[256];
+    private static final int[] PSEUDO_B = new int[256];
+
+    static {
+        for (int g = 0; g <= 255; g++) {
+            int rP;
+            int gP;
+            int bP;
+            if (g < 64) {
+                rP = 0;
+                gP = 0;
+                bP = g * 4;
+            } else if (g < 128) {
+                int t = (g - 64) * 4;
+                rP = 0;
+                gP = t;
+                bP = 255 - t;
+            } else if (g < 192) {
+                int t = (g - 128) * 4;
+                rP = t;
+                gP = 255 - t;
+                bP = 0;
+            } else {
+                int t = (g - 192) * 4;
+                rP = 255;
+                gP = t;
+                bP = 0;
+            }
+            PSEUDO_R[g] = rP;
+            PSEUDO_G[g] = gP;
+            PSEUDO_B[g] = bP;
+        }
+    }
     
     private CameraSettings cameraSettings;
     private AppState appState;
@@ -181,37 +217,132 @@ public class CameraModel implements CameraContract.Model {
     
     @Override
     public Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness) {
-        return createPseudoColorImage(originalBitmap, exifBrightness, 0);
+        return createPseudoColorImage(originalBitmap, exifBrightness, 0, 1.0f);
     }
 
     public Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness, int rotationDegrees) {
+        return createPseudoColorImage(originalBitmap, exifBrightness, rotationDegrees, 1.0f);
+    }
+
+    public Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness, int rotationDegrees, float brightnessGain) {
         if (originalBitmap == null) return null;
-        
+
         int width = originalBitmap.getWidth();
         int height = originalBitmap.getHeight();
 
-        // 生成伪彩色图像
+        // 双变量伪彩色：
+        // - Hue 仍由亮度（gray）决定（沿用原有灰度分段映射）
+        // - Saturation 由局部对比度决定（使用 3x3 邻域 max-min，更贴近原有高质量效果）
+        final float CONTRAST_GAIN = 3.55f; // 再提高色彩量感，同时维持低对比度强抑制
+        final float CONTRAST_FLOOR = 0.014f; // 稍微回落门限：避免“又不够彩”
+        final float CONTRAST_EXP = 1.35f; // 降低指数抑制：让中低对比度更快上色，同时保留 CONTRAST_FLOOR 的噪声控制
+        final float INV_255 = 1f / 255f;
+
+        float gain = brightnessGain;
+        if (!Float.isFinite(gain) || gain <= 0f) gain = 1.0f;
+
         int[] pixels = new int[width * height];
         originalBitmap.getPixels(pixels, 0, width, 0, 0, width, height);
 
+        float[] gray = new float[width * height]; // 0..255（已乘 brightnessGain 并 clamp）
+        float globalMin = 255f;
+        float globalMax = 0f;
         for (int i = 0; i < pixels.length; i++) {
-            int gray = Color.red(pixels[i]);
-            int color;
-            if (gray < 64) {
-                color = Color.rgb(0, 0, gray * 4);
-            } else if (gray < 128) {
-                int blue = 255 - (gray - 64) * 4;
-                int green = (gray - 64) * 4;
-                color = Color.rgb(0, green, blue);
-            } else if (gray < 192) {
-                int green = 255 - (gray - 128) * 4;
-                int red = (gray - 128) * 4;
-                color = Color.rgb(red, green, 0);
-            } else {
-                int green = (gray - 192) * 4;
-                color = Color.rgb(255, green, 0);
+            int rgb = pixels[i];
+            int r = Color.red(rgb);
+            int g = Color.green(rgb);
+            int b = Color.blue(rgb);
+            float luma = 0.299f * r + 0.587f * g + 0.114f * b;
+            float boosted = luma * gain;
+            if (boosted < 0f) boosted = 0f;
+            if (boosted > 255f) boosted = 255f;
+            gray[i] = boosted;
+            if (boosted < globalMin) globalMin = boosted;
+            if (boosted > globalMax) globalMax = boosted;
+        }
+
+        // 只用于 Hue 的映射：把本帧亮度范围拉到 [0,255]，让红/蓝更容易拉开。
+        float hueInvRange = (globalMax - globalMin) > 1e-3f ? (255f / (globalMax - globalMin)) : 1f;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int idx = y * width + x;
+
+                float minG = 255f;
+                float maxG = 0f;
+                for (int dy = -1; dy <= 1; dy++) {
+                    int yy = y + dy;
+                    if (yy < 0) yy = 0;
+                    if (yy >= height) yy = height - 1;
+                    int rowBase = yy * width;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int xx = x + dx;
+                        if (xx < 0) xx = 0;
+                        if (xx >= width) xx = width - 1;
+                        float gVal = gray[rowBase + xx];
+                        if (gVal < minG) minG = gVal;
+                        if (gVal > maxG) maxG = gVal;
+                    }
+                }
+
+                float contrast = (maxG - minG) * INV_255; // 0..1
+                float contrastAdj;
+                if (contrast <= CONTRAST_FLOOR) {
+                    contrastAdj = 0f;
+                } else {
+                    // 把 [CONTRAST_FLOOR, 1] 重新映射到 [0, 1]
+                    contrastAdj = (contrast - CONTRAST_FLOOR) / (1f - CONTRAST_FLOOR);
+                    if (contrastAdj < 0f) contrastAdj = 0f;
+                    if (contrastAdj > 1f) contrastAdj = 1f;
+                }
+
+                // 幂次映射：噪声通常表现为接近阈值的低对比度，幂次可强力抑制它
+                float s = (float) Math.pow(contrastAdj, CONTRAST_EXP) * CONTRAST_GAIN;
+                if (s < 0f) s = 0f;
+                if (s > 1f) s = 1f;
+                // 先保证颜色分明：当前阶段暂时忽略噪声彩花控制，使用全饱和输出
+                s = 1f;
+
+                // Hue：使用“全局拉伸后”的亮度值做分段映射
+                int g255 = Math.round((gray[idx] - globalMin) * hueInvRange);
+                if (g255 < 0) g255 = 0;
+                if (g255 > 255) g255 = 255;
+
+                // Hue：沿用原有灰度分段伪彩色
+                int rP = 0, gP = 0, bP = 0;
+                if (g255 < 64) {
+                    rP = 0;
+                    gP = 0;
+                    bP = g255 * 4;
+                } else if (g255 < 128) {
+                    int t = (g255 - 64) * 4;
+                    rP = 0;
+                    gP = t;
+                    bP = 255 - t;
+                } else if (g255 < 192) {
+                    int t = (g255 - 128) * 4;
+                    rP = t;
+                    gP = 255 - t;
+                    bP = 0;
+                } else {
+                    int t = (g255 - 192) * 4;
+                    rP = 255;
+                    gP = t;
+                    bP = 0;
+                }
+
+                int outR = Math.round(g255 + (rP - g255) * s);
+                int outG = Math.round(g255 + (gP - g255) * s);
+                int outB = Math.round(g255 + (bP - g255) * s);
+                if (outR < 0) outR = 0;
+                if (outR > 255) outR = 255;
+                if (outG < 0) outG = 0;
+                if (outG > 255) outG = 255;
+                if (outB < 0) outB = 0;
+                if (outB > 255) outB = 255;
+
+                pixels[idx] = Color.rgb(outR, outG, outB);
             }
-            pixels[i] = color;
         }
 
         Bitmap pseudoBitmap = Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888);
@@ -304,7 +435,8 @@ public class CameraModel implements CameraContract.Model {
         paint.setAntiAlias(true);
         paint.setColor(Color.BLACK);
         paint.setTextSize(32);
-        canvas.drawText("亮度L (cd/m²)", rotatedWidth + 18, 48, paint);
+        canvas.drawText("亮度L (Hue)", rotatedWidth + 18, 48, paint);
+        canvas.drawText("饱和度~对比度", rotatedWidth + 18, 84, paint);
 
         final int legendLevels = 4;
         double delta = Lcenter * 0.25;

@@ -43,6 +43,8 @@ public interface CameraContract {
         void applyCameraIsoParameter(int iso);
         void applyCameraExposureParameter(long exposure);
         void setPreviewBrightness(float gain);
+        /** 与离线伪彩一致：boosted luma 归一化后的全局 min/max，用于预览 Hue 拉伸 */
+        void setPreviewPseudoHueRange(float minBoostedN, float maxBoostedN);
         
         // 获取当前进度值
         int getIsoProgress();

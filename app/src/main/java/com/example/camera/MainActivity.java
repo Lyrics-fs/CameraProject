@@ -15,12 +15,23 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
+import android.text.InputType;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
+import android.view.Gravity;
+import android.view.View;
+import android.view.Window;
+import android.widget.FrameLayout;
+import android.widget.ProgressBar;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
@@ -62,6 +73,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private static final String KEY_AUTO_STEP_PERCENT = "auto_step_percent";
     private static final String KEY_BV_THRESHOLD_MILLI = "bv_threshold_milli";
     private static final String KEY_ADVANCED_TUNING_EXPANDED = "advanced_tuning_expanded";
+    private static final String KEY_CALIBRATION_BAR_EXPANDED = "calibration_bar_expanded";
     private static final int[] STABLE_FRAME_OPTIONS = new int[]{3, 4, 5};
     private static final int[] AUTO_STEP_PERCENT_OPTIONS = new int[]{20, 25, 30};
     private static final int[] BV_THRESHOLD_MILLI_OPTIONS = new int[]{150, 200, 250};
@@ -72,6 +84,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     // UI 组件
     private GLSurfaceView glSurfaceView;
     private Button captureButton;
+    private boolean isCapturing = false;
     private ImageView imageView;
     private TextView tvBrightnessValue;
     private TextView tvExposureLabel;
@@ -81,7 +94,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private TextView tvAutoExposureRecommendation;
     private TextView tvCalibrationStatus;
     private TextView tvCurveSource;
+    private FrameLayout previewLoadingOverlay;
+    private ProgressBar previewLoadingProgress;
+    private TextView previewLoadingText;
     private Button btnRetry;
+    private TextView btnUserHelp;
     private Button btnModeToggle;
     private Button btnApplyRecommendation;
     private Button btnAutoTune;
@@ -93,8 +110,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private Button btnStartCalibration;
     private Button btnCaptureCalibration;
     private Button btnFinishCalibration;
+    private Button btnToggleCalibrationBar;
+    private View calibrationActionsRow;
+    private LinearLayout dockMainActionsRow;
     private LinearLayout manualControlsContainer;
-    private LinearLayout advancedTuningContainer;
+    private View advancedTuningContainer;
     private SeekBar seekBarBrightness, seekBarIso, seekBarExposure;
 
     // OpenGL ES 渲染器
@@ -113,6 +133,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private boolean isProgrammaticSeekBarUpdate = false;
     private boolean isRecommendationMode = false;
     private boolean isAdvancedTuningExpanded = false;
+    private boolean calibrationBarExpanded = true;
     private boolean isCameraStartPending = false;
 
     // 相机参数（通过 Camera2 Interop 手动控制）
@@ -162,7 +183,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         tvAutoExposureRecommendation = findViewById(R.id.tv_auto_exposure_recommendation);
         tvCalibrationStatus = findViewById(R.id.tv_calibration_status);
         tvCurveSource = findViewById(R.id.tv_curve_source);
+        previewLoadingOverlay = findViewById(R.id.preview_loading_overlay);
+        previewLoadingProgress = findViewById(R.id.preview_loading_progress);
+        previewLoadingText = findViewById(R.id.preview_loading_text);
         btnRetry          = findViewById(R.id.btn_retry);
+        btnUserHelp       = findViewById(R.id.btn_user_help);
         btnModeToggle     = findViewById(R.id.btn_mode_toggle);
         btnApplyRecommendation = findViewById(R.id.btn_apply_recommendation);
         btnAutoTune       = findViewById(R.id.btn_auto_tune);
@@ -174,6 +199,9 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         btnStartCalibration = findViewById(R.id.btn_start_calibration);
         btnCaptureCalibration = findViewById(R.id.btn_capture_calibration);
         btnFinishCalibration = findViewById(R.id.btn_finish_calibration);
+        btnToggleCalibrationBar = findViewById(R.id.btn_toggle_calibration_bar);
+        calibrationActionsRow = findViewById(R.id.calibration_actions_row);
+        dockMainActionsRow = findViewById(R.id.dock_main_actions_row);
         manualControlsContainer = findViewById(R.id.manual_controls_container);
         advancedTuningContainer = findViewById(R.id.advanced_tuning_container);
         seekBarBrightness = findViewById(R.id.seekBarBrightness);
@@ -184,15 +212,30 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         setupSeekBars();
         captureButton.setOnClickListener(v -> takePicture());
         btnRetry.setOnClickListener(v -> retryLastOperation());
+        if (btnUserHelp != null) {
+            btnUserHelp.setOnClickListener(v -> showUserHelpDialog());
+        }
         setupRecommendationControls();
         presenter = new CameraPresenter(this, this);
         imageRepository = new ImageRepository(this);
         presenter.onViewCreated();
+        setupSeekBarMicroInteractions();
         loadRecommendationPrefs();
         updateControlModeUI();
         updateCalibrationButtons();
-        setupPreviewLayoutOnce();
         requestCameraPermissionIfNeeded();
+    }
+
+    private void setPreviewLoading(boolean loading, String message) {
+        if (previewLoadingOverlay == null) return;
+        if (loading) {
+            previewLoadingOverlay.setVisibility(View.VISIBLE);
+            if (message != null && !message.isEmpty() && previewLoadingText != null) {
+                previewLoadingText.setText(message);
+            }
+        } else {
+            previewLoadingOverlay.setVisibility(View.GONE);
+        }
     }
 
     private void setupRecommendationControls() {
@@ -202,7 +245,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         });
         btnAutoTune.setOnClickListener(v -> {
             boolean enabled = presenter.toggleAutoTune();
-            btnAutoTune.setText(enabled ? "自动微调: 开" : "自动微调: 关");
+            btnAutoTune.setText(enabled ? "微调:开" : "微调:关");
             if (enabled) {
                 tvStatus.setText("自动微调中");
             } else {
@@ -218,7 +261,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         btnStableFrames.setOnClickListener(v -> {
             int nextValue = getNextStableFrameCount(presenter.getAutoApplyStableFrameCount());
             presenter.setAutoApplyStableFrameCount(nextValue);
-            btnStableFrames.setText("稳定帧: " + nextValue);
+            btnStableFrames.setText("帧:" + nextValue);
             persistStableFrames(nextValue);
             updateStatusAndRecommendationHint("自动微调稳定帧 = " + nextValue);
         });
@@ -226,7 +269,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             int currentPercent = (int) Math.round(presenter.getAutoApplyStepRatio() * 100.0);
             int nextPercent = getNextAutoStepPercent(sanitizeAutoStepPercent(currentPercent));
             presenter.setAutoApplyStepRatio(nextPercent / 100.0);
-            btnAutoStepRatio.setText("自动步进: " + nextPercent + "%");
+            btnAutoStepRatio.setText("步进:" + nextPercent + "%");
             persistAutoStepPercent(nextPercent);
             updateStatusAndRecommendationHint("自动微调步进 = " + nextPercent + "%");
         });
@@ -234,7 +277,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             int currentMilli = (int) Math.round(presenter.getAutoApplyBvDeltaThreshold() * 1000.0);
             int nextMilli = getNextBvThresholdMilli(sanitizeBvThresholdMilli(currentMilli));
             presenter.setAutoApplyBvDeltaThreshold(nextMilli / 1000.0);
-            btnBvThreshold.setText("BV阈值: " + String.format("%.2f", nextMilli / 1000.0));
+            btnBvThreshold.setText("BV:" + String.format("%.2f", nextMilli / 1000.0));
             persistBvThresholdMilli(nextMilli);
             updateStatusAndRecommendationHint("自动微调BV阈值 = " + String.format("%.2f", nextMilli / 1000.0));
         });
@@ -261,6 +304,10 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             presenter.finishCalibration();
             updateCalibrationButtons();
         });
+        btnToggleCalibrationBar.setOnClickListener(v -> {
+            calibrationBarExpanded = !calibrationBarExpanded;
+            applyCalibrationBarExpanded(calibrationBarExpanded, true);
+        });
     }
 
     private void loadRecommendationPrefs() {
@@ -269,15 +316,24 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         isAdvancedTuningExpanded = sharedPreferences.getBoolean(KEY_ADVANCED_TUNING_EXPANDED, false);
         int stableFrames = sanitizeStableFrames(sharedPreferences.getInt(KEY_STABLE_FRAMES, STABLE_FRAME_OPTIONS[0]));
         presenter.setAutoApplyStableFrameCount(stableFrames);
-        btnStableFrames.setText("稳定帧: " + stableFrames);
         int autoStepPercent = sanitizeAutoStepPercent(
                 sharedPreferences.getInt(KEY_AUTO_STEP_PERCENT, AUTO_STEP_PERCENT_OPTIONS[1]));
         presenter.setAutoApplyStepRatio(autoStepPercent / 100.0);
-        btnAutoStepRatio.setText("自动步进: " + autoStepPercent + "%");
         int bvThresholdMilli = sanitizeBvThresholdMilli(
                 sharedPreferences.getInt(KEY_BV_THRESHOLD_MILLI, BV_THRESHOLD_MILLI_OPTIONS[1]));
         presenter.setAutoApplyBvDeltaThreshold(bvThresholdMilli / 1000.0);
-        btnBvThreshold.setText("BV阈值: " + String.format("%.2f", bvThresholdMilli / 1000.0));
+        calibrationBarExpanded = sharedPreferences.getBoolean(KEY_CALIBRATION_BAR_EXPANDED, true);
+        refreshAdvancedTuningButtonLabels();
+        applyCalibrationBarExpanded(calibrationBarExpanded, false);
+    }
+
+    private void refreshAdvancedTuningButtonLabels() {
+        if (presenter == null) return;
+        btnAutoTune.setText(presenter.isAutoTuneEnabled() ? "微调:开" : "微调:关");
+        btnStableFrames.setText("帧:" + presenter.getAutoApplyStableFrameCount());
+        int step = (int) Math.round(presenter.getAutoApplyStepRatio() * 100.0);
+        btnAutoStepRatio.setText("步进:" + step + "%");
+        btnBvThreshold.setText("BV:" + String.format("%.2f", presenter.getAutoApplyBvDeltaThreshold()));
     }
 
     private void setupPreviewLayoutOnce() {
@@ -489,6 +545,144 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         });
     }
 
+    private void setupSeekBarMicroInteractions() {
+        double evMicro = 1.0 / 3.0;
+
+        // 长按：弹出 +/- 1/3 EV 微调
+        seekBarIso.setLongClickable(true);
+        seekBarIso.setOnLongClickListener(v -> {
+            showEvMicroAdjustDialog("ISO 微调（+/- 1/3 EV）",
+                    () -> presenter.adjustIsoByEv(-evMicro),
+                    () -> presenter.adjustIsoByEv(evMicro));
+            presenter.onUserManualAdjustmentStarted();
+            return true;
+        });
+
+        seekBarExposure.setLongClickable(true);
+        seekBarExposure.setOnLongClickListener(v -> {
+            showEvMicroAdjustDialog("曝光微调（+/- 1/3 EV）",
+                    () -> presenter.adjustExposureByEv(-evMicro),
+                    () -> presenter.adjustExposureByEv(evMicro));
+            presenter.onUserManualAdjustmentStarted();
+            return true;
+        });
+
+        // 亮度增益：长按按“增益倍率”做 +/- 1/3 EV 形式的缩放
+        seekBarBrightness.setLongClickable(true);
+        seekBarBrightness.setOnLongClickListener(v -> {
+            showEvMicroAdjustDialog("亮度增益微调（+/- 1/3 EV）",
+                    () -> presenter.adjustBrightnessGainByEv(-evMicro),
+                    () -> presenter.adjustBrightnessGainByEv(evMicro));
+            presenter.onUserManualAdjustmentStarted();
+            return true;
+        });
+
+        // 双击：数值输入（ISO / 曝光(ms) / 亮度增益×）
+        setupDoubleTapInput(seekBarIso, new Runnable() {
+            @Override public void run() {
+                showIsoInputDialog();
+            }
+        });
+        setupDoubleTapInput(seekBarExposure, new Runnable() {
+            @Override public void run() {
+                showExposureInputDialogMs();
+            }
+        });
+        setupDoubleTapInput(seekBarBrightness, new Runnable() {
+            @Override public void run() {
+                showBrightnessInputDialog();
+            }
+        });
+    }
+
+    private void showEvMicroAdjustDialog(String title, Runnable onMinus, Runnable onPlus) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage("确认微调后将更新预览与硬件参数。")
+                .setNegativeButton("-1/3 EV", (d, w) -> {
+                    onMinus.run();
+                })
+                .setPositiveButton("+1/3 EV", (d, w) -> {
+                    onPlus.run();
+                })
+                .show();
+    }
+
+    private void setupDoubleTapInput(SeekBar target, Runnable onDoubleTap) {
+        GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                onDoubleTap.run();
+                return true;
+            }
+        });
+
+        target.setOnTouchListener((v, event) -> detector.onTouchEvent(event));
+    }
+
+    private void showIsoInputDialog() {
+        EditText et = new EditText(this);
+        et.setInputType(InputType.TYPE_CLASS_NUMBER);
+        et.setHint("例如：400");
+        et.setText(String.valueOf(presenter != null ? presenter.getCurrentIsoForDebug() : 400));
+        new AlertDialog.Builder(this)
+                .setTitle("输入 ISO")
+                .setView(et)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("应用", (d, w) -> {
+                    try {
+                        int iso = Integer.parseInt(et.getText().toString().trim());
+                        presenter.onUserManualAdjustmentStarted();
+                        presenter.setIsoByUserValue(iso);
+                    } catch (Exception ignore) {
+                        reportError("ISO 输入无效", null, false);
+                    }
+                })
+                .show();
+    }
+
+    private void showExposureInputDialogMs() {
+        EditText et = new EditText(this);
+        et.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        et.setHint("曝光时间(ms)，例如：10 或 0.5");
+        et.setText(String.valueOf(presenter != null ? presenter.getCurrentExposureMsForDebug() : 10.0));
+        new AlertDialog.Builder(this)
+                .setTitle("输入曝光时间（ms）")
+                .setView(et)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("应用", (d, w) -> {
+                    try {
+                        double ms = Double.parseDouble(et.getText().toString().trim());
+                        presenter.onUserManualAdjustmentStarted();
+                        presenter.setExposureByMillis(ms);
+                    } catch (Exception ignore) {
+                        reportError("曝光时间输入无效", null, false);
+                    }
+                })
+                .show();
+    }
+
+    private void showBrightnessInputDialog() {
+        EditText et = new EditText(this);
+        et.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        et.setHint("亮度增益（×），例如：1.0 或 0.8");
+        et.setText(String.valueOf(presenter != null ? presenter.getCurrentBrightnessGainForDebug() : 1.0f));
+        new AlertDialog.Builder(this)
+                .setTitle("输入亮度增益（×）")
+                .setView(et)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("应用", (d, w) -> {
+                    try {
+                        float gain = Float.parseFloat(et.getText().toString().trim());
+                        presenter.onUserManualAdjustmentStarted();
+                        presenter.setBrightnessGainByValue(gain);
+                    } catch (Exception ignore) {
+                        reportError("亮度增益输入无效", null, false);
+                    }
+                })
+                .show();
+    }
+
     @androidx.camera.camera2.interop.ExperimentalCamera2Interop
     private void applyCamera2Options() {
         if (camera == null) return;
@@ -519,6 +713,12 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
 
     private void takePicture() {
         if (imageCapture == null) return;
+        if (isCapturing) return;
+        isCapturing = true;
+        runOnUiThread(() -> {
+            captureButton.setEnabled(false);
+            updateStatus("正在生成伪彩图并保存...", false, false);
+        });
         imageCapture.takePicture(captureExecutor, new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(@NonNull ImageProxy imageProxy) {
@@ -528,12 +728,18 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                     }
                 } finally {
                     imageProxy.close();
+                    runOnUiThread(() -> {
+                        isCapturing = false;
+                        captureButton.setEnabled(true);
+                    });
                 }
             }
 
             @Override
             public void onError(@NonNull ImageCaptureException exception) {
                 reportError("拍照失败，请重试", exception, true);
+                isCapturing = false;
+                runOnUiThread(() -> captureButton.setEnabled(true));
             }
         });
     }
@@ -548,18 +754,12 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         Bitmap originalBitmap = decodeSampledBitmap(bytes, MAX_DECODE_DIMENSION, MAX_DECODE_DIMENSION);
         if (originalBitmap == null) return false;
 
-        // 保存原始 JPEG 到 MediaStore/DCIM/Camera
-        String originalName = System.currentTimeMillis() + "_original.jpg";
-        android.net.Uri originalUri = imageRepository.saveJpegBytes(bytes, originalName);
-        if (originalUri == null) {
-            reportError("保存原始图像失败，请重试", null, true);
-        }
-
-        // 读取 EXIF 亮度
-        String exifBrightness = imageRepository.readExifBrightness(originalUri);
-
         // 生成伪彩色图像并显示
         int rotationDegrees = imageProxy.getImageInfo().getRotationDegrees();
+
+        // EXIF 从内存 bytes 直接解析，避免先保存到 MediaStore 再读取带来的 IO 延迟
+        String exifBrightness = imageRepository.readExifBrightnessFromBytes(bytes);
+
         Bitmap pseudoBitmap = presenter.createPseudoColorImage(originalBitmap, exifBrightness, rotationDegrees);
         if (pseudoBitmap == null) {
             if (!originalBitmap.isRecycled()) {
@@ -579,6 +779,10 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         } else {
             reportError("保存伪彩色图像失败，请重试", null, true);
         }
+
+        // 最后再保存原始 JPEG：不阻塞“伪彩图保存成功”的反馈
+        String originalName = System.currentTimeMillis() + "_original.jpg";
+        imageRepository.saveJpegBytes(bytes, originalName);
 
         // 释放拍照原图，避免在拍照链路中长期占用大内存。
         if (!originalBitmap.isRecycled()) {
@@ -653,6 +857,19 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                 .show();
     }
 
+    private void showUserHelpDialog() {
+        View content = getLayoutInflater().inflate(R.layout.dialog_user_help, null);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(content)
+                .create();
+        dialog.setCanceledOnTouchOutside(true);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+        dialog.show();
+    }
+
     private void retryLastOperation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -698,6 +915,12 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             btnAELock.setVisibility(android.view.View.GONE);
             manualControlsContainer.setVisibility(android.view.View.VISIBLE);
             tvAutoExposureRecommendation.setText("手动模式: 可拖动滑杆调节");
+        }
+        if (dockMainActionsRow != null) {
+            dockMainActionsRow.setGravity(
+                    isRecommendationMode
+                            ? Gravity.CENTER_VERTICAL
+                            : Gravity.CENTER_VERTICAL | Gravity.CENTER_HORIZONTAL);
         }
     }
 
@@ -801,6 +1024,21 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         }
     }
 
+    private void applyCalibrationBarExpanded(boolean expanded, boolean persistPrefs) {
+        calibrationBarExpanded = expanded;
+        if (calibrationActionsRow != null) {
+            calibrationActionsRow.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        }
+        if (btnToggleCalibrationBar != null) {
+            btnToggleCalibrationBar.setText(expanded ? "收起标定 ▴" : "标定 ▾");
+        }
+        if (persistPrefs) {
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putBoolean(KEY_CALIBRATION_BAR_EXPANDED, expanded)
+                    .apply();
+        }
+    }
+
     private void updateCalibrationButtons() {
         boolean active = presenter != null && presenter.isCalibrationModeActive();
         btnStartCalibration.setEnabled(!active);
@@ -871,11 +1109,18 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     public void updateCameraStatus(String status) {
         Log.d(TAG, "Camera status: " + status);
         updateStatus(status, false, false);
+        boolean ready = status != null && status.contains("就绪");
+        // 非就绪状态遮罩提示用户正在等待相机画面
+        setPreviewLoading(!ready, status != null ? status : "相机启动中...");
     }
 
     @Override
     public void updatePhotoCount(int count) {
-        runOnUiThread(() -> captureButton.setText("拍照 " + count));
+        runOnUiThread(() -> {
+            if (captureButton != null) {
+                captureButton.setText("拍照\n" + count);
+            }
+        });
     }
 
     @Override
@@ -927,7 +1172,13 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
 
     @Override
     public void updateCalibrationStatus(String text) {
-        runOnUiThread(() -> tvCalibrationStatus.setText(text));
+        runOnUiThread(() -> {
+            tvCalibrationStatus.setText(text);
+            if (text != null && text.startsWith("标定完成")) {
+                calibrationBarExpanded = false;
+                applyCalibrationBarExpanded(false, true);
+            }
+        });
     }
 
     @Override
@@ -977,6 +1228,13 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     @Override
     public void setPreviewBrightness(float gain) {
         cameraRenderer.setBrightness(gain);
+        glSurfaceView.requestRender();
+    }
+
+    @Override
+    public void setPreviewPseudoHueRange(float minBoostedN, float maxBoostedN) {
+        if (glSurfaceView == null || cameraRenderer == null) return;
+        glSurfaceView.queueEvent(() -> cameraRenderer.setPseudoHueRange(minBoostedN, maxBoostedN));
         glSurfaceView.requestRender();
     }
 

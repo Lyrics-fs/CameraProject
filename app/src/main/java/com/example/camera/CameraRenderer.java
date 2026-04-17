@@ -30,33 +30,33 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
             "    vTexCoord = (uTexMatrix * vec4(aTexCoord, 0.0, 1.0)).xy;\n" +
             "}\n";
 
-    // 片段着色器：将灰度映射为伪彩色（蓝→青→绿→黄→红）
+    // 片段着色器：与 CameraModel.createPseudoColorImage 对齐（luma*gain → 全局拉伸 Hue → 分段伪彩；当前离线 s=1 全饱和）
     private static final String FRAGMENT_SHADER =
             "#extension GL_OES_EGL_image_external : require\n" +
             "precision mediump float;\n" +
             "uniform samplerExternalOES uTexture;\n" +
             "varying vec2 vTexCoord;\n" +
-            "uniform float uBrightness;\n" +   // 亮度增益 [0.5, 2.0]
+            "uniform float uBrightness;\n" +
+            "uniform float uHueMin;\n" +
+            "uniform float uHueMax;\n" +
             "void main() {\n" +
             "    vec4 color = texture2D(uTexture, vTexCoord);\n" +
-            // 亮度增益
-            "    vec3 boosted = clamp(color.rgb * uBrightness, 0.0, 1.0);\n" +
-            // 转灰度
-            "    float gray = dot(boosted, vec3(0.299, 0.587, 0.114));\n" +
-            // 伪彩色映射：4段线性插值
+            "    float luma = dot(color.rgb, vec3(0.299, 0.587, 0.114));\n" +
+            "    float boosted = clamp(luma * uBrightness, 0.0, 1.0);\n" +
+            "    float hr = clamp((boosted - uHueMin) / max(uHueMax - uHueMin, 1e-4), 0.0, 1.0);\n" +
+            "    float g = hr * 255.0;\n" +
             "    vec3 pseudo;\n" +
-            "    if (gray < 0.25) {\n" +
-            "        float t = gray / 0.25;\n" +
-            "        pseudo = mix(vec3(0.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), t);\n" +
-            "    } else if (gray < 0.5) {\n" +
-            "        float t = (gray - 0.25) / 0.25;\n" +
-            "        pseudo = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0), t);\n" +
-            "    } else if (gray < 0.75) {\n" +
-            "        float t = (gray - 0.5) / 0.25;\n" +
-            "        pseudo = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), t);\n" +
+            "    if (g < 64.0) {\n" +
+            "        pseudo = vec3(0.0, 0.0, g * 4.0 / 255.0);\n" +
+            "    } else if (g < 128.0) {\n" +
+            "        float t = (g - 64.0) * 4.0;\n" +
+            "        pseudo = vec3(0.0, t / 255.0, (255.0 - t) / 255.0);\n" +
+            "    } else if (g < 192.0) {\n" +
+            "        float t = (g - 128.0) * 4.0;\n" +
+            "        pseudo = vec3(t / 255.0, (255.0 - t) / 255.0, 0.0);\n" +
             "    } else {\n" +
-            "        float t = (gray - 0.75) / 0.25;\n" +
-            "        pseudo = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t);\n" +
+            "        float t = (g - 192.0) * 4.0;\n" +
+            "        pseudo = vec3(1.0, t / 255.0, 0.0);\n" +
             "    }\n" +
             "    gl_FragColor = vec4(pseudo, 1.0);\n" +
             "}\n";
@@ -86,6 +86,8 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
     private int uTextureHandle;
     private int uBrightnessHandle;
     private int uTexMatrixHandle;
+    private int uHueMinHandle;
+    private int uHueMaxHandle;
 
     // SurfaceTexture 变换矩阵（修正方向）
     private final float[] texMatrix = new float[16];
@@ -94,6 +96,8 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
     private volatile float viewAspect = 1.0f;
     private volatile float cameraAspect = 4f / 3f; // 默认 4:3，bindCameraPreview 后更新
     private volatile boolean aspectDirty = false;
+    private volatile float hueMin = 0f;
+    private volatile float hueMax = 1f;
 
     private int[] cameraTextureId = new int[1];
     private SurfaceTexture surfaceTexture;
@@ -129,6 +133,22 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
         aspectDirty = true;
     }
 
+    /** 与离线伪彩一致：对 boosted luma 做全局 min/max 拉伸后再映射 Hue（由分析线程传入） */
+    public void setPseudoHueRange(float minBoostedN, float maxBoostedN) {
+        if (!Float.isFinite(minBoostedN) || !Float.isFinite(maxBoostedN)) return;
+        if (maxBoostedN <= minBoostedN + 1e-4f) {
+            hueMin = 0f;
+            hueMax = 1f;
+            return;
+        }
+        hueMin = Math.max(0f, Math.min(1f, minBoostedN));
+        hueMax = Math.max(0f, Math.min(1f, maxBoostedN));
+        if (hueMax <= hueMin + 1e-4f) {
+            hueMin = 0f;
+            hueMax = 1f;
+        }
+    }
+
     @Override
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         GLES20.glClearColor(0f, 0f, 0f, 1f);
@@ -159,6 +179,8 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
         uTextureHandle    = GLES20.glGetUniformLocation(program, "uTexture");
         uBrightnessHandle = GLES20.glGetUniformLocation(program, "uBrightness");
         uTexMatrixHandle  = GLES20.glGetUniformLocation(program, "uTexMatrix");
+        uHueMinHandle = GLES20.glGetUniformLocation(program, "uHueMin");
+        uHueMaxHandle = GLES20.glGetUniformLocation(program, "uHueMax");
 
         // 初始化单位矩阵
         Matrix.setIdentityM(texMatrix, 0);
@@ -228,6 +250,8 @@ public class CameraRenderer implements GLSurfaceView.Renderer {
 
         // 传递亮度增益
         GLES20.glUniform1f(uBrightnessHandle, brightness);
+        GLES20.glUniform1f(uHueMinHandle, hueMin);
+        GLES20.glUniform1f(uHueMaxHandle, hueMax);
 
         // 传递 SurfaceTexture 变换矩阵（修正相机方向）
         GLES20.glUniformMatrix4fv(uTexMatrixHandle, 1, false, texMatrix, 0);

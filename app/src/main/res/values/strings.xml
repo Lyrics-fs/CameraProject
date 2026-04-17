@@ -1,3 +1,6 @@
 <resources>
-    <string name="app_name">My Application</string>
+    <string name="app_name">CameraProject</string>
+    <string name="user_help_title">使用说明</string>
+    <string name="user_help_chip">使用说明</string>
+    <string name="user_help_body">【切换模式】目的是在「跟随测光建议」与「完全手控曝光」之间二选一：推荐模式便于快速拍准；手动模式便于固定参数或刻意欠/过曝。\n\n【应用推荐值】目的是把当前算出的 ISO/曝光立刻套到相机，省掉反复对齐的时间。\n\n【锁定当前推荐值】目的是在构图不变时冻结曝光读数，避免轻微晃动导致推荐值跳动。\n\n【高级参数】目的是调节自动微调有多积极：稳定帧越多越稳但反应慢；步进与 BV 阈值决定每次改多少、多容易触发调整。\n\n【标定】目的是让「亮度—BV」换算贴合你的手机传感器，使伪彩图与 E 值更可信；需灰卡/色卡上多点采样后再拟合。入口在预览左下角、位于「高级参数」下方，点「标定」展开后开始标定、采样、完成拟合。\n\n【拍照】目的是同时保存原图与伪彩分析结果，便于对比真实亮度与可视化分布。\n\n【重试 / 就绪提示】目的是在相机未绑定或出错时给你恢复预览的入口；就绪前请勿依赖画面构图。</string>
 </resources>

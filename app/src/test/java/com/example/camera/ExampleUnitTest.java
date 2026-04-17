@@ -125,6 +125,7 @@ public class ExampleUnitTest {
         @Override public void applyCameraIsoParameter(int iso) { appliedIso = iso; }
         @Override public void applyCameraExposureParameter(long exposure) { appliedExposure = exposure; }
         @Override public void setPreviewBrightness(float gain) { lastBrightnessGain = gain; }
+        @Override public void setPreviewPseudoHueRange(float minBoostedN, float maxBoostedN) {}
         @Override public int getIsoProgress() { return 0; }
         @Override public int getExposureProgress() { return 0; }
         @Override public int getBrightnessProgress() { return 0; }

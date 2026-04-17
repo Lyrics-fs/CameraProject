@@ -1,393 +1,692 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 预览约 2/3：左上 E/状态+使用说明；左下模式+高级参数+标定（标定在高级参数下）；下 1/3 参数区 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/bg_root"
+    android:fitsSystemWindows="true"
     android:orientation="vertical"
-    android:background="@color/bg_root">
+    android:weightSum="3">
 
-    <!-- ── 预览区 ── -->
-    <android.opengl.GLSurfaceView
-        android:id="@+id/gl_surface_view"
+    <FrameLayout
+        android:id="@+id/preview_container"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="0" />
+        android:layout_weight="2">
 
-    <!-- ── 控制面板 ── -->
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="@color/bg_panel"
-        android:fillViewport="true"
-        android:overScrollMode="never">
-
-        <LinearLayout
+        <android.opengl.GLSurfaceView
+            android:id="@+id/gl_surface_view"
             android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- 左上：角标（E+状态）与「使用说明」分框；说明在就绪角标下方、独立半透明底 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
-            android:paddingTop="14dp"
-            android:paddingBottom="16dp">
+            android:layout_gravity="top|start"
+            android:layout_marginStart="8dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="48dp"
+            android:orientation="vertical">
 
-            <!-- ── 曝光量状态卡片 ── -->
             <LinearLayout
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:background="@drawable/card_background"
-                android:orientation="horizontal"
-                android:padding="14dp"
-                android:gravity="center_vertical">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="曝光量"
-                        android:textColor="@color/text_label"
-                        android:textSize="11sp"
-                        android:letterSpacing="0.08" />
-
-                    <TextView
-                        android:id="@+id/tv_display_value"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="E = 0.00"
-                        android:textColor="@color/accent_green"
-                        android:textSize="22sp"
-                        android:textStyle="bold"
-                        android:fontFamily="monospace" />
-                </LinearLayout>
-
-                <!-- 最近拍摄缩略图 -->
-                <ImageView
-                    android:id="@+id/iv"
-                    android:layout_width="64dp"
-                    android:layout_height="64dp"
-                    android:scaleType="centerCrop"
-                    android:background="@drawable/card_background"
-                    android:src="@mipmap/ic_launcher"
-                    android:padding="2dp" />
-
-            </LinearLayout>
-
-            <!-- ── 统一状态/错误区（含重试） ── -->
-            <LinearLayout
-                android:id="@+id/status_container"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:background="@drawable/card_background"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:padding="12dp">
+                android:background="@drawable/bg_preview_hud"
+                android:orientation="vertical"
+                android:paddingStart="8dp"
+                android:paddingTop="5dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="5dp">
 
                 <TextView
-                    android:id="@+id/tv_status"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="状态: 初始化中..."
-                    android:textColor="@color/status_text"
-                    android:textSize="12sp" />
-
-                <Button
-                    android:id="@+id/btn_retry"
+                    android:id="@+id/tv_display_value"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="重试"
-                    android:textSize="12sp"
-                    android:visibility="gone" />
+                    android:fontFamily="monospace"
+                    android:includeFontPadding="false"
+                    android:lines="1"
+                    android:text="E = 0.00"
+                    android:textColor="@color/accent_green"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/status_container"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tv_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxWidth="200dp"
+                        android:maxLines="1"
+                        android:text="状态: 初始化中..."
+                        android:textColor="@color/status_text"
+                        android:textSize="10sp" />
+
+                    <Button
+                        android:id="@+id/btn_retry"
+                        android:layout_width="wrap_content"
+                        android:layout_height="24dp"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/btn_dock_secondary"
+                        android:minWidth="48dp"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
+                        android:text="重试"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="9sp"
+                        android:visibility="gone" />
+                </LinearLayout>
             </LinearLayout>
 
             <TextView
-                android:id="@+id/tv_auto_exposure_recommendation"
-                android:layout_width="match_parent"
+                android:id="@+id/btn_user_help"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:background="@drawable/card_background"
-                android:padding="12dp"
-                android:text="推荐 ISO: --, 曝光: -- ms, BV: --"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_user_help_card"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackgroundBorderless"
+                android:includeFontPadding="false"
+                android:paddingStart="8dp"
+                android:paddingTop="5dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="5dp"
+                android:text="@string/user_help_chip"
+                android:textColor="@color/white"
+                android:textSize="9sp" />
+        </LinearLayout>
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:background="@drawable/card_background"
-                android:orientation="vertical"
-                android:padding="12dp">
-
-                <TextView
-                    android:id="@+id/tv_curve_source"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="曲线来源: 先验"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-
-                <TextView
-                    android:id="@+id/tv_calibration_status"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="标定模式未开始"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/btn_start_calibration"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="开始标定"
-                        android:textAllCaps="false" />
-
-                    <Button
-                        android:id="@+id/btn_capture_calibration"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:layout_weight="1"
-                        android:text="采样"
-                        android:textAllCaps="false" />
-
-                    <Button
-                        android:id="@+id/btn_finish_calibration"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:layout_weight="1"
-                        android:text="完成拟合"
-                        android:textAllCaps="false" />
-                </LinearLayout>
-            </LinearLayout>
+        <!-- 左下：模式切换 + 高级参数（展开后为 2×2），同一列对齐，半透明底 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start"
+            android:layout_marginStart="4dp"
+            android:layout_marginBottom="4dp"
+            android:elevation="2dp"
+            android:maxWidth="260dp"
+            android:orientation="vertical">
 
             <Button
                 android:id="@+id/btn_mode_toggle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
+                android:background="@drawable/bg_preview_hud"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:minHeight="28dp"
+                android:paddingStart="2dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="2dp"
+                android:paddingBottom="2dp"
+                android:stateListAnimator="@null"
                 android:text="切换到推荐模式"
-                android:textAllCaps="false" />
-
-            <Button
-                android:id="@+id/btn_apply_recommendation"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="应用推荐值"
-                android:textAllCaps="false" />
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp"
+                app:backgroundTint="@null" />
 
             <Button
                 android:id="@+id/btn_toggle_advanced_tuning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="高级参数: 展开"
-                android:textAllCaps="false" />
+                android:layout_marginTop="2dp"
+                android:background="@drawable/bg_preview_hud"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:minHeight="28dp"
+                android:paddingStart="2dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="2dp"
+                android:paddingBottom="2dp"
+                android:stateListAnimator="@null"
+                android:text="高级参数 ▾"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp"
+                app:backgroundTint="@null" />
 
-            <LinearLayout
+            <GridLayout
                 android:id="@+id/advanced_tuning_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
+                android:layout_marginTop="2dp"
+                android:alignmentMode="alignMargins"
+                android:columnCount="2"
+                android:columnOrderPreserved="false"
+                android:rowCount="2"
+                android:useDefaultMargins="false"
                 android:visibility="gone">
 
                 <Button
                     android:id="@+id/btn_auto_tune"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
-                    android:text="自动微调: 关"
-                    android:textAllCaps="false" />
+                    android:layout_row="0"
+                    android:layout_column="0"
+                    android:layout_columnWeight="1"
+                    android:layout_gravity="fill_horizontal"
+                    android:layout_marginEnd="1dp"
+                    android:layout_marginBottom="2dp"
+                    android:background="@drawable/bg_preview_hud"
+                    android:ellipsize="end"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:minHeight="28dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="1dp"
+                    android:paddingTop="2dp"
+                    android:paddingEnd="1dp"
+                    android:paddingBottom="2dp"
+                    android:stateListAnimator="@null"
+                    android:text="微调:关"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="9sp"
+                    app:backgroundTint="@null" />
 
                 <Button
                     android:id="@+id/btn_stable_frames"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
-                    android:text="稳定帧: 3"
-                    android:textAllCaps="false" />
+                    android:layout_row="0"
+                    android:layout_column="1"
+                    android:layout_columnWeight="1"
+                    android:layout_gravity="fill_horizontal"
+                    android:layout_marginBottom="2dp"
+                    android:background="@drawable/bg_preview_hud"
+                    android:ellipsize="end"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:minHeight="28dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="1dp"
+                    android:paddingTop="2dp"
+                    android:paddingEnd="1dp"
+                    android:paddingBottom="2dp"
+                    android:stateListAnimator="@null"
+                    android:text="帧:3"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="9sp"
+                    app:backgroundTint="@null" />
 
                 <Button
                     android:id="@+id/btn_auto_step_ratio"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
-                    android:text="自动步进: 25%"
-                    android:textAllCaps="false" />
+                    android:layout_row="1"
+                    android:layout_column="0"
+                    android:layout_columnWeight="1"
+                    android:layout_gravity="fill_horizontal"
+                    android:layout_marginEnd="1dp"
+                    android:background="@drawable/bg_preview_hud"
+                    android:ellipsize="end"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:minHeight="28dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="1dp"
+                    android:paddingTop="2dp"
+                    android:paddingEnd="1dp"
+                    android:paddingBottom="2dp"
+                    android:stateListAnimator="@null"
+                    android:text="步进:25%"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="9sp"
+                    app:backgroundTint="@null" />
 
                 <Button
                     android:id="@+id/btn_bv_threshold"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
-                    android:text="BV阈值: 0.20"
-                    android:textAllCaps="false" />
+                    android:layout_row="1"
+                    android:layout_column="1"
+                    android:layout_columnWeight="1"
+                    android:layout_gravity="fill_horizontal"
+                    android:background="@drawable/bg_preview_hud"
+                    android:ellipsize="end"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:minHeight="28dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="1dp"
+                    android:paddingTop="2dp"
+                    android:paddingEnd="1dp"
+                    android:paddingBottom="2dp"
+                    android:stateListAnimator="@null"
+                    android:text="BV:0.20"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="9sp"
+                    app:backgroundTint="@null" />
+            </GridLayout>
+
+            <Button
+                android:id="@+id/btn_toggle_calibration_bar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:background="@drawable/bg_preview_hud"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:minHeight="28dp"
+                android:paddingStart="2dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="2dp"
+                android:paddingBottom="2dp"
+                android:stateListAnimator="@null"
+                android:text="收起标定 ▴"
+                android:textAllCaps="false"
+                android:textColor="@color/text_secondary"
+                android:textSize="10sp"
+                app:backgroundTint="@null" />
+
+            <LinearLayout
+                android:id="@+id/calibration_actions_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:gravity="center_horizontal"
+                android:orientation="horizontal">
 
                 <Button
-                    android:id="@+id/btn_ae_lock"
-                    android:layout_width="match_parent"
+                    android:id="@+id/btn_start_calibration"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
-                    android:text="锁定当前推荐值"
-                    android:textAllCaps="false" />
+                    android:background="@drawable/selector_calibration_start"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:minHeight="28dp"
+                    android:paddingStart="4dp"
+                    android:paddingTop="2dp"
+                    android:paddingEnd="4dp"
+                    android:paddingBottom="2dp"
+                    android:stateListAnimator="@null"
+                    android:text="开始标定"
+                    android:textAllCaps="false"
+                    android:textColor="@color/calibration_start_text"
+                    android:textSize="9sp"
+                    app:backgroundTint="@null" />
+
+                <Button
+                    android:id="@+id/btn_capture_calibration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/selector_calibration_action"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:minHeight="28dp"
+                    android:paddingStart="4dp"
+                    android:paddingTop="2dp"
+                    android:paddingEnd="4dp"
+                    android:paddingBottom="2dp"
+                    android:stateListAnimator="@null"
+                    android:text="采样"
+                    android:textAllCaps="false"
+                    android:textColor="@color/calibration_action_text"
+                    android:textSize="9sp"
+                    app:backgroundTint="@null" />
+
+                <Button
+                    android:id="@+id/btn_finish_calibration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/selector_calibration_action"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:minHeight="28dp"
+                    android:paddingStart="4dp"
+                    android:paddingTop="2dp"
+                    android:paddingEnd="4dp"
+                    android:paddingBottom="2dp"
+                    android:stateListAnimator="@null"
+                    android:text="完成拟合"
+                    android:textAllCaps="false"
+                    android:textColor="@color/calibration_action_text"
+                    android:textSize="9sp"
+                    app:backgroundTint="@null" />
             </LinearLayout>
+        </LinearLayout>
 
-            <!-- ── 参数控制卡片 ── -->
+        <FrameLayout
+            android:id="@+id/preview_loading_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#66000000"
+            android:gravity="center"
+            android:visibility="gone">
+
             <LinearLayout
-                android:id="@+id/manual_controls_container"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="14dp"
-                android:background="@drawable/card_background"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <!-- 曝光时间行 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="曝光时间"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <TextView
-                        android:id="@+id/tv_exposure"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="—"
-                        android:textColor="@color/text_value"
-                        android:textSize="13sp"
-                        android:fontFamily="monospace" />
-                </LinearLayout>
-                <SeekBar
-                    android:id="@+id/seekBarExposure"
-                    android:layout_width="match_parent"
-                    android:layout_height="32dp"
-                    android:layout_marginBottom="14dp"
-                    android:max="5000"
-                    android:progressDrawable="@drawable/seekbar_progress"
-                    android:thumb="@drawable/seekbar_thumb" />
-
-                <!-- 分隔线 -->
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginBottom="14dp"
-                    android:background="@color/bg_card_stroke" />
-
-                <!-- ISO行 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="ISO"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <TextView
-                        android:id="@+id/tv_iso"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="—"
-                        android:textColor="@color/text_value"
-                        android:textSize="13sp"
-                        android:fontFamily="monospace" />
-                </LinearLayout>
-                <SeekBar
-                    android:id="@+id/seekBarIso"
-                    android:layout_width="match_parent"
-                    android:layout_height="32dp"
-                    android:layout_marginBottom="14dp"
-                    android:max="5000"
-                    android:progressDrawable="@drawable/seekbar_progress"
-                    android:thumb="@drawable/seekbar_thumb" />
-
-                <!-- 分隔线 -->
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginBottom="14dp"
-                    android:background="@color/bg_card_stroke" />
-
-                <!-- 亮度增益行 -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="亮度增益"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp" />
-                    <TextView
-                        android:id="@+id/tv_brightness_label"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="×1.0"
-                        android:textColor="@color/text_value"
-                        android:textSize="13sp"
-                        android:fontFamily="monospace" />
-                </LinearLayout>
-                <SeekBar
-                    android:id="@+id/seekBarBrightness"
-                    android:layout_width="match_parent"
-                    android:layout_height="32dp"
-                    android:max="5000"
-                    android:progressDrawable="@drawable/seekbar_progress"
-                    android:thumb="@drawable/seekbar_thumb" />
-
-            </LinearLayout>
-
-            <!-- ── 拍照按钮区 ── -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
                 android:gravity="center"
-                android:layout_marginTop="4dp">
+                android:orientation="vertical">
+
+                <ProgressBar
+                    android:id="@+id/preview_loading_progress"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/preview_loading_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="相机启动中..."
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </FrameLayout>
+    </FrameLayout>
+
+    <!-- 下 1/3：可滚动参数 + 窄主操作栏（E/状态已叠在预览角标） -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/bg_panel"
+        android:orientation="vertical">
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:overScrollMode="ifContentScrolls"
+            android:scrollbars="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="6dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="6dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="6dp"
+                    android:background="@drawable/card_background"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="5dp"
+                    android:paddingTop="3dp"
+                    android:paddingEnd="5dp"
+                    android:paddingBottom="3dp">
+
+                    <TextView
+                        android:id="@+id/tv_auto_exposure_recommendation"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:text="推荐 ISO: --, 曝光: -- ms, BV: --"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp" />
+
+                    <ImageView
+                        android:id="@+id/iv"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:background="@drawable/card_background"
+                        android:padding="2dp"
+                        android:scaleType="centerCrop"
+                        android:src="@mipmap/ic_launcher" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="6dp"
+                    android:background="@drawable/card_background"
+                    android:orientation="vertical"
+                    android:paddingStart="5dp"
+                    android:paddingTop="3dp"
+                    android:paddingEnd="5dp"
+                    android:paddingBottom="3dp">
+
+                    <TextView
+                        android:id="@+id/tv_curve_source"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="曲线来源: 先验"
+                        android:textColor="@color/text_primary"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/tv_calibration_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="标定模式未开始"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/manual_controls_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/card_background"
+                    android:orientation="vertical"
+                    android:paddingStart="5dp"
+                    android:paddingTop="3dp"
+                    android:paddingEnd="5dp"
+                    android:paddingBottom="3dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="曝光时间"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tv_exposure"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:fontFamily="monospace"
+                            android:text="—"
+                            android:textColor="@color/text_value"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekBarExposure"
+                        android:layout_width="match_parent"
+                        android:layout_height="20dp"
+                        android:layout_marginBottom="4dp"
+                        android:max="5000"
+                        android:progressDrawable="@drawable/seekbar_progress"
+                        android:thumb="@drawable/seekbar_thumb" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="@color/bg_card_stroke" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="ISO"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tv_iso"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:fontFamily="monospace"
+                            android:text="—"
+                            android:textColor="@color/text_value"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekBarIso"
+                        android:layout_width="match_parent"
+                        android:layout_height="20dp"
+                        android:layout_marginBottom="4dp"
+                        android:max="5000"
+                        android:progressDrawable="@drawable/seekbar_progress"
+                        android:thumb="@drawable/seekbar_thumb" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="@color/bg_card_stroke" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="亮度增益"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tv_brightness_label"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:fontFamily="monospace"
+                            android:text="×1.0"
+                            android:textColor="@color/text_value"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekBarBrightness"
+                        android:layout_width="match_parent"
+                        android:layout_height="20dp"
+                        android:max="5000"
+                        android:progressDrawable="@drawable/seekbar_progress"
+                        android:thumb="@drawable/seekbar_thumb" />
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+        <LinearLayout
+            android:id="@+id/primary_action_dock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="8dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="6dp">
+
+            <LinearLayout
+                android:id="@+id/dock_main_actions_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btn_apply_recommendation"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/btn_dock_primary"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:minHeight="32dp"
+                    android:paddingTop="3dp"
+                    android:paddingBottom="3dp"
+                    android:text="应用推荐值"
+                    android:textAllCaps="false"
+                    android:textColor="@color/white"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
 
                 <Button
                     android:id="@+id/btn"
-                    android:layout_width="72dp"
-                    android:layout_height="72dp"
+                    android:layout_width="64dp"
+                    android:layout_height="64dp"
+                    android:layout_marginStart="6dp"
+                    android:layout_marginEnd="6dp"
                     android:background="@drawable/capture_button_background"
-                    android:text=""
-                    android:elevation="6dp" />
+                    android:contentDescription="拍照"
+                    android:elevation="4dp"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:lineSpacingMultiplier="0.85"
+                    android:maxLines="2"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:text="拍照\n0"
+                    android:textColor="@color/white"
+                    android:textSize="9sp" />
 
+                <Button
+                    android:id="@+id/btn_ae_lock"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/btn_dock_secondary"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:minHeight="32dp"
+                    android:paddingTop="3dp"
+                    android:paddingBottom="3dp"
+                    android:text="锁定当前推荐值"
+                    android:textAllCaps="false"
+                    android:textColor="@color/text_primary"
+                    android:textSize="10sp" />
             </LinearLayout>
-
         </LinearLayout>
-    </ScrollView>
+    </LinearLayout>
 
 </LinearLayout>

@@ -68,6 +68,17 @@ public class CameraPresenter implements CameraContract.Presenter {
     private double latestMeanY = Double.NaN;
     private double latestSceneBv = Double.NaN;
     private long lastCalibrationSampleTs = 0L;
+    /**
+     * 用于“拍照离线伪彩色”和“预览端伪彩色”保持一致：
+     * 只有在这里（onBrightnessChanged）会调用 view.setPreviewBrightness(gain)。
+     * 因此推荐/自动流程即使程序性修改 SeekBar，也不会破坏这个值。
+     */
+    private float lastPreviewBrightnessGain = 1.0f;
+    /** 预览 Hue 全局拉伸：与离线 createPseudoColorImage 中 globalMin/globalMax 对齐（由分析帧估计） */
+    private float previewHueMinSmoothed = 0f;
+    private float previewHueMaxSmoothed = 1f;
+    private boolean previewHueRangeInitialized = false;
+    private static final float PREVIEW_HUE_RANGE_EMA = 0.2f;
     private final AutoTuneState autoTuneState = new AutoTuneState(
             AUTO_APPLY_STABLE_FRAME_COUNT_DEFAULT,
             AUTO_APPLY_STEP_RATIO_DEFAULT,
@@ -108,6 +119,10 @@ public class CameraPresenter implements CameraContract.Presenter {
         closeCamera();
         calibrationModeActive = false;
         calibrationSession.setStatus(CalibrationSession.Status.IDLE);
+        previewHueRangeInitialized = false;
+        previewHueMinSmoothed = 0f;
+        previewHueMaxSmoothed = 1f;
+        view.setPreviewPseudoHueRange(0f, 1f);
     }
 
     @Override
@@ -186,10 +201,13 @@ public class CameraPresenter implements CameraContract.Presenter {
 
     public Bitmap createPseudoColorImage(Bitmap originalBitmap, String exifBrightness, int rotationDegrees) {
         if (model instanceof CameraModel) {
-            return ((CameraModel) model).createPseudoColorImage(originalBitmap, exifBrightness, rotationDegrees);
+            float gain = lastPreviewBrightnessGain;
+            return ((CameraModel) model).createPseudoColorImage(originalBitmap, exifBrightness, rotationDegrees, gain);
         }
         return model.createPseudoColorImage(originalBitmap, exifBrightness);
     }
+
+    // computeCurrentBrightnessGain() 已弃用：改为使用 lastPreviewBrightnessGain
 
     public void startAutoExposureAnalysis() {
         imageAnalysis = new ImageAnalysis.Builder()
@@ -201,6 +219,7 @@ public class CameraPresenter implements CameraContract.Presenter {
             try {
                 CameraModel.ExposureRecommendation recommendation = analyzeExposureRecommendation(image);
                 latestMeanY = estimateMeanLuma(image);
+                updatePreviewHueRangeFromAnalysis(image);
                 if (recommendation != null) {
                     latestSceneBv = recommendation.currentSceneBV;
                     updateStability(latestMeanY);
@@ -305,6 +324,7 @@ public class CameraPresenter implements CameraContract.Presenter {
         }
 
         float gain = 0.5f + (progress / (float) SEEK_MAX) * 1.5f;
+        lastPreviewBrightnessGain = gain;
         view.setPreviewBrightness(gain);
         view.updateBrightnessMode(String.format("×%.1f", gain));
         updateExposureValueDisplay(settings);
@@ -585,6 +605,130 @@ public class CameraPresenter implements CameraContract.Presenter {
         return calibrationModeActive;
     }
 
+    // -------------------------------------------------------------------------
+    // SeekBar 精确微调交互（长按 +/- 1/3 EV、双击数值输入）
+    // -------------------------------------------------------------------------
+    private static final double EV_MICRO_DELTA = 1.0 / 3.0;
+    private static final float BRIGHTNESS_GAIN_MIN = 0.5f;
+    private static final float BRIGHTNESS_GAIN_MAX = 2.0f;
+
+    public int getCurrentIsoForDebug() {
+        CameraSettings settings = model.getCameraSettings();
+        return settings != null ? settings.getIso() : -1;
+    }
+
+    public double getCurrentExposureMsForDebug() {
+        CameraSettings settings = model.getCameraSettings();
+        return settings != null ? (settings.getExposureTime() / 1_000_000.0) : 0.0;
+    }
+
+    public float getCurrentBrightnessGainForDebug() {
+        int progress = view != null ? view.getBrightnessProgress() : 0;
+        float gain = BRIGHTNESS_GAIN_MIN + (progress / (float) SEEK_MAX) * (BRIGHTNESS_GAIN_MAX - BRIGHTNESS_GAIN_MIN);
+        if (!Float.isFinite(gain)) return 1.0f;
+        return gain;
+    }
+
+    public void adjustIsoByEv(double evDelta) {
+        CameraSettings settings = model.getCameraSettings();
+        Range<Integer> isoRange = settings.getIsoRange();
+        if (isoRange == null) return;
+
+        int minIso = Math.max(isoRange.getLower(), MANUAL_SAFE_MIN_ISO);
+        int maxIso = Math.min(isoRange.getUpper(), MANUAL_SAFE_MAX_ISO);
+        if (maxIso <= minIso) {
+            minIso = isoRange.getLower();
+            maxIso = isoRange.getUpper();
+        }
+        int current = settings.getIso();
+        if (current <= 0) current = minIso;
+
+        double factor = Math.pow(2.0, evDelta);
+        int target = (int) Math.round(current * factor);
+        setIsoByUserValue(target);
+    }
+
+    public void setIsoByUserValue(int iso) {
+        CameraSettings settings = model.getCameraSettings();
+        Range<Integer> isoRange = settings.getIsoRange();
+        if (isoRange == null) return;
+
+        int minIso = Math.max(isoRange.getLower(), MANUAL_SAFE_MIN_ISO);
+        int maxIso = Math.min(isoRange.getUpper(), MANUAL_SAFE_MAX_ISO);
+        if (maxIso <= minIso) {
+            minIso = isoRange.getLower();
+            maxIso = isoRange.getUpper();
+        }
+
+        int clamped = Math.max(minIso, Math.min(maxIso, iso));
+        int progress = toProgressInt(clamped, minIso, maxIso);
+        view.setSeekBarProgress(R.id.seekBarIso, progress);
+        onIsoChanged(progress);
+    }
+
+    public void adjustExposureByEv(double evDelta) {
+        CameraSettings settings = model.getCameraSettings();
+        Range<Long> exposureRange = settings.getExposureRange();
+        if (exposureRange == null) return;
+
+        long minExposure = Math.max(exposureRange.getLower(), MANUAL_SAFE_MIN_EXPOSURE_NS);
+        long maxExposure = Math.min(exposureRange.getUpper(), MANUAL_SAFE_MAX_EXPOSURE_NS);
+        if (maxExposure <= minExposure) {
+            minExposure = exposureRange.getLower();
+            maxExposure = exposureRange.getUpper();
+        }
+        long current = settings.getExposureTime();
+        if (current <= 0) current = minExposure;
+
+        double factor = Math.pow(2.0, evDelta);
+        long target = Math.round(current * factor);
+        setExposureByNs(target);
+    }
+
+    public void setExposureByMillis(double exposureMs) {
+        if (!Double.isFinite(exposureMs)) return;
+        double ns = exposureMs * 1_000_000.0;
+        if (!Double.isFinite(ns)) return;
+        setExposureByNs((long) Math.round(ns));
+    }
+
+    private void setExposureByNs(long exposureNs) {
+        CameraSettings settings = model.getCameraSettings();
+        Range<Long> exposureRange = settings.getExposureRange();
+        if (exposureRange == null) return;
+
+        long minExposure = Math.max(exposureRange.getLower(), MANUAL_SAFE_MIN_EXPOSURE_NS);
+        long maxExposure = Math.min(exposureRange.getUpper(), MANUAL_SAFE_MAX_EXPOSURE_NS);
+        if (maxExposure <= minExposure) {
+            minExposure = exposureRange.getLower();
+            maxExposure = exposureRange.getUpper();
+        }
+
+        long clamped = Math.max(minExposure, Math.min(maxExposure, exposureNs));
+        int progress = toProgressLong(clamped, minExposure, maxExposure);
+        view.setSeekBarProgress(R.id.seekBarExposure, progress);
+        onExposureChanged(progress);
+    }
+
+    public void adjustBrightnessGainByEv(double evDelta) {
+        // 将“亮度增益”当作可缩放系数：gain *= 2^(evDelta)
+        float currentGain = getCurrentBrightnessGainForDebug();
+        float factor = (float) Math.pow(2.0, evDelta);
+        float targetGain = currentGain * factor;
+        setBrightnessGainByValue(targetGain);
+    }
+
+    public void setBrightnessGainByValue(float gain) {
+        float clamped = gain;
+        if (!Float.isFinite(clamped)) return;
+        clamped = Math.max(BRIGHTNESS_GAIN_MIN, Math.min(BRIGHTNESS_GAIN_MAX, clamped));
+
+        int progress = (int) Math.round(((clamped - BRIGHTNESS_GAIN_MIN) / (BRIGHTNESS_GAIN_MAX - BRIGHTNESS_GAIN_MIN)) * SEEK_MAX);
+        progress = Math.max(0, Math.min(SEEK_MAX, progress));
+        view.setSeekBarProgress(R.id.seekBarBrightness, progress);
+        onBrightnessChanged(progress);
+    }
+
     private CurveParams fitCurveParams(List<CalibrationSample> samples) {
         return CalibrationFitter.fitExpCurve(samples, CALIBRATION_MIN_SAMPLES, CALIBRATION_MIN_BV_SPREAD);
     }
@@ -614,6 +758,60 @@ public class CameraPresenter implements CameraContract.Presenter {
             }
         }
         return count > 0 ? (sum * 1.0 / count) : Double.NaN;
+    }
+
+    private float[] estimateBoostedLumaMinMax(ImageProxy image, float gain) {
+        if (image == null || image.getPlanes().length == 0) return null;
+        ImageProxy.PlaneProxy yPlane = image.getPlanes()[0];
+        java.nio.ByteBuffer yBuffer = yPlane.getBuffer().duplicate();
+        int width = image.getWidth();
+        int height = image.getHeight();
+        int rowStride = yPlane.getRowStride();
+        int pixelStride = yPlane.getPixelStride();
+        float g = gain;
+        if (!Float.isFinite(g) || g <= 0f) g = 1.0f;
+        float minB = 1f;
+        float maxB = 0f;
+        int step = 4;
+        for (int y = 0; y < height; y += step) {
+            int rowStart = y * rowStride;
+            for (int x = 0; x < width; x += step) {
+                int index = rowStart + x * pixelStride;
+                if (index >= 0 && index < yBuffer.limit()) {
+                    float lumaN = (yBuffer.get(index) & 0xFF) / 255f;
+                    float boosted = Math.min(1f, Math.max(0f, lumaN * g));
+                    if (boosted < minB) minB = boosted;
+                    if (boosted > maxB) maxB = boosted;
+                }
+            }
+        }
+        if (maxB < minB) return null;
+        return new float[]{minB, maxB};
+    }
+
+    private void updatePreviewHueRangeFromAnalysis(ImageProxy image) {
+        float[] minMax = estimateBoostedLumaMinMax(image, lastPreviewBrightnessGain);
+        if (minMax == null) return;
+        float minB = minMax[0];
+        float maxB = minMax[1];
+        if (maxB - minB < 1e-4f) {
+            minB = 0f;
+            maxB = 1f;
+        }
+        if (!previewHueRangeInitialized) {
+            previewHueMinSmoothed = minB;
+            previewHueMaxSmoothed = maxB;
+            previewHueRangeInitialized = true;
+        } else {
+            float alpha = PREVIEW_HUE_RANGE_EMA;
+            previewHueMinSmoothed += alpha * (minB - previewHueMinSmoothed);
+            previewHueMaxSmoothed += alpha * (maxB - previewHueMaxSmoothed);
+        }
+        if (previewHueMaxSmoothed - previewHueMinSmoothed < 1e-4f) {
+            previewHueMinSmoothed = 0f;
+            previewHueMaxSmoothed = 1f;
+        }
+        view.setPreviewPseudoHueRange(previewHueMinSmoothed, previewHueMaxSmoothed);
     }
 
     private void updateStability(double meanY) {

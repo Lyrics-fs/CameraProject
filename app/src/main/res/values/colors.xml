@@ -6,8 +6,12 @@
     <!-- Camera App - Dark Theme -->
     <color name="bg_root">#0D0D0D</color>
     <color name="bg_panel">#1C1C1E</color>
+    <!-- 底部固定主操作区：略浅于面板，与内容区分离 -->
+    <color name="bg_dock">#252528</color>
     <color name="bg_card">#2C2C2E</color>
     <color name="bg_card_stroke">#3A3A3C</color>
+    <!-- 主题 colorPrimary 用中性灰，避免 Material 默认紫色 -->
+    <color name="theme_control_gray">#3A3A3C</color>
 
     <!-- Accent -->
     <color name="accent_orange">#FF9500</color>
@@ -18,7 +22,8 @@
 
     <!-- Text -->
     <color name="text_primary">#FFFFFF</color>
-    <color name="text_secondary">#AEAEB2</color>
+    <!-- 次要说明文字：略提亮，便于深色底上扫读 -->
+    <color name="text_secondary">#C8C8CC</color>
     <color name="text_label">#8E8E93</color>
     <color name="text_value">#FF9500</color>
 
