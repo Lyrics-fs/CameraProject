@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tv_cal_status_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/white"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_cal_status_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:lineSpacingMultiplier="1.1"
+            android:textColor="@color/white"
+            android:textSize="13sp" />
+
+        <RadioGroup
+            android:id="@+id/rg_cal_mode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/radio_cal_off"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:buttonTint="@color/white"
+                android:text="@string/sensor_cal_mode_off"
+                android:textColor="@color/white" />
+
+            <RadioButton
+                android:id="@+id/radio_cal_linear"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:buttonTint="@color/white"
+                android:text="@string/sensor_cal_mode_linear"
+                android:textColor="@color/white" />
+
+            <RadioButton
+                android:id="@+id/radio_cal_piecewise"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:buttonTint="@color/white"
+                android:text="@string/sensor_cal_mode_piecewise"
+                android:textColor="@color/white" />
+        </RadioGroup>
+
+        <LinearLayout
+            android:id="@+id/panel_linear"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/sensor_cal_label_scale"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/et_cal_scale"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:inputType="numberSigned|numberDecimal"
+                    android:text="1.0"
+                    android:textColor="@color/white"
+                    android:textColorHint="@color/text_secondary" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/sensor_cal_label_offset"
+                    android:textColor="@color/white"
+                    android:textSize="13sp" />
+
+                <EditText
+                    android:id="@+id/et_cal_offset"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:inputType="numberSigned|numberDecimal"
+                    android:text="0"
+                    android:textColor="@color/white"
+                    android:textColorHint="@color/text_secondary" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/panel_piecewise"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/sensor_cal_segments_title"
+                android:textColor="@color/white"
+                android:textSize="13sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/sensor_cal_segment_infinity_hint"
+                android:textColor="@color/white"
+                android:textSize="11sp" />
+
+            <LinearLayout
+                android:id="@+id/segment_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="vertical" />
+
+            <Button
+                android:id="@+id/btn_add_segment"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/sensor_cal_add_segment"
+                android:textAllCaps="false"
+                android:textColor="@color/white"
+                app:backgroundTint="@color/bg_card" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btn_calibration_verify"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/cal_verify_entry"
+            android:textAllCaps="false"
+            android:textColor="@color/white"
+            android:visibility="gone"
+            app:backgroundTint="@color/bg_card" />
+
+        <Button
+            android:id="@+id/btn_cal_apply_recommended"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sensor_cal_apply_recommended"
+            android:textAllCaps="false"
+            android:textColor="@color/white"
+            app:backgroundTint="@color/bg_card" />
+
+        <Button
+            android:id="@+id/btn_cal_restore"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sensor_cal_restore_default"
+            android:textAllCaps="false"
+            android:textColor="@color/white"
+            app:backgroundTint="@color/bg_card" />
+
+        <Button
+            android:id="@+id/btn_cal_save"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sensor_cal_save_apply"
+            android:textAllCaps="false"
+            android:textColor="@color/white"
+            app:backgroundTint="@color/bg_card" />
+    </LinearLayout>
+</ScrollView>

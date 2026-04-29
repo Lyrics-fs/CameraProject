@@ -12,6 +12,9 @@
     <color name="bg_card_stroke">#3A3A3C</color>
     <!-- 主题 colorPrimary 用中性灰，避免 Material 默认紫色 -->
     <color name="theme_control_gray">#3A3A3C</color>
+    <!-- 设置 / 后台统计：浅灰底块（替代 Tonal/卡片默认浅紫色调）上的主色字 -->
+    <color name="light_neutral_surface">#E8E8EC</color>
+    <color name="text_dark_on_light">#1C1C1E</color>
 
     <!-- Accent -->
     <color name="accent_orange">#FF9500</color>

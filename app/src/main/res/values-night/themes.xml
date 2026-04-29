@@ -12,4 +12,20 @@
         <item name="android:navigationBarColor">@color/bg_root</item>
         <item name="colorControlHighlight">#33FFFFFF</item>
     </style>
+
+    <style name="Theme.SensorCalibration" parent="Theme.MyApplication">
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/white</item>
+        <item name="android:textColorTertiary">@color/text_secondary</item>
+        <item name="colorOnSurface">@color/white</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="android:editTextColor">@color/white</item>
+    </style>
+
+    <style name="Theme.DebugStats" parent="Theme.MyApplication">
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/white</item>
+        <item name="colorOnSurface">@color/white</item>
+        <item name="colorOnSurfaceVariant">@color/white</item>
+    </style>
 </resources>

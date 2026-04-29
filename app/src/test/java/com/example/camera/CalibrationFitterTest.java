@@ -3,6 +3,7 @@ package com.example.camera;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import com.example.camera.model.calibration.CalibrationFitter;
 import com.example.camera.model.calibration.CalibrationSample;
@@ -30,6 +31,8 @@ public class CalibrationFitterTest {
         assertNotNull(params);
         assertEquals(expectedA, params.a, 0.01);
         assertEquals(expectedB, params.b, 0.01);
+        assertTrue(params.getRSquared() > 0.999);
+        assertTrue(params.isHighQuality());
     }
 
     @Test
@@ -52,5 +55,43 @@ public class CalibrationFitterTest {
         }
         CurveParams params = CalibrationFitter.fitExpCurve(samples, 8, 0.5);
         assertNull(params);
+    }
+
+    @Test
+    public void calculateRSquared_tooFewSamples_returnsZero() {
+        List<CalibrationSample> samples = new ArrayList<>();
+        samples.add(new CalibrationSample(0.0, 10.0, 100.0, 0L, true));
+        assertEquals(0.0, CalibrationFitter.calculateRSquared(samples, 1.0, 0.5), 0.0);
+    }
+
+    @Test
+    public void calculateRSquared_identicalL_returnsZero() {
+        List<CalibrationSample> samples = new ArrayList<>();
+        samples.add(new CalibrationSample(0.0, 42.0, 100.0, 0L, true));
+        samples.add(new CalibrationSample(1.0, 42.0, 100.0, 0L, true));
+        assertEquals(0.0, CalibrationFitter.calculateRSquared(samples, 1.0, 0.1), 0.0);
+    }
+
+    @Test
+    public void fitExpCurve_removesHighRelativeErrorOutlierWhenR2Improves() {
+        double a = 3.2;
+        double b = 0.61;
+        List<CalibrationSample> samples = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            double bv = -2.0 + i * 0.35;
+            samples.add(new CalibrationSample(bv, a * Math.exp(b * bv), 120.0, 0L, true));
+        }
+        double bvBad = -2.0 + 5 * 0.35;
+        double lGood = a * Math.exp(b * bvBad);
+        samples.add(new CalibrationSample(bvBad, lGood * 0.5, 100.0, 0L, true));
+
+        CalibrationFitter.FitResult fr = CalibrationFitter.fitExpCurveResult(samples, 8, 0.5);
+        assertNotNull(fr);
+        CurveParams params = fr.getCurveParams();
+        assertTrue(params.getCalibrationOutliersRemoved() >= 1);
+        assertEquals(9, fr.getSamplesUsed().size());
+        assertTrue(params.getRSquared() > 0.99);
+        assertEquals(a, params.a, 0.02);
+        assertEquals(b, params.b, 0.02);
     }
 }

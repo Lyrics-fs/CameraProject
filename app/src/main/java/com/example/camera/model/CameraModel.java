@@ -22,6 +22,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 /**
  * 数据层Model实现
@@ -421,7 +424,7 @@ public class CameraModel implements CameraContract.Model {
         drawLegend(canvas, rotatedWidth, rotatedHeight, legendWidth, Lcenter);
         
         // 绘制统计信息
-        drawStatistics(canvas, avgR, avgG, avgB, yValue, exifBrightness, bv);
+        drawStatistics(canvas, originalBitmap, avgR, avgG, avgB, yValue, exifBrightness, bv);
 
         return finalBitmap;
     }
@@ -486,28 +489,117 @@ public class CameraModel implements CameraContract.Model {
     }
     
     /**
-     * 绘制统计信息
+     * 原图中心区域（约 1/4×1/4）平均亮度 DN，与标定/预览中心 ROI 语义一致；大图子采样以控制耗时。
      */
-    private void drawStatistics(Canvas canvas, int avgR, int avgG, int avgB, double yValue, String exifBrightness, float bv) {
+    private double computeCenterRegionMeanDn(Bitmap bitmap) {
+        if (bitmap == null || bitmap.isRecycled()) {
+            return Double.NaN;
+        }
+        int w = bitmap.getWidth();
+        int h = bitmap.getHeight();
+        if (w < 1 || h < 1) {
+            return Double.NaN;
+        }
+        int rw = Math.max(1, w / 4);
+        int rh = Math.max(1, h / 4);
+        int x0 = (w - rw) / 2;
+        int y0 = (h - rh) / 2;
+        int stepX = Math.max(1, rw / 64);
+        int stepY = Math.max(1, rh / 64);
+        double sum = 0.0;
+        int n = 0;
+        for (int y = y0; y < y0 + rh; y += stepY) {
+            for (int x = x0; x < x0 + rw; x += stepX) {
+                int p = bitmap.getPixel(x, y);
+                sum += 0.299 * Color.red(p) + 0.587 * Color.green(p) + 0.114 * Color.blue(p);
+                n++;
+            }
+        }
+        return n > 0 ? sum / n : Double.NaN;
+    }
+
+    /**
+     * 绘制统计信息（与拍照伪色图导出模板一致）
+     */
+    private void drawStatistics(Canvas canvas, Bitmap originalBitmap, int avgR, int avgG, int avgB,
+                               double yValue, String exifBrightness, float bv) {
         Paint textPaint = new Paint();
         textPaint.setColor(Color.WHITE);
         textPaint.setTextSize(36);
         textPaint.setAntiAlias(true);
         textPaint.setShadowLayer(2.0f, 2, 2, Color.BLACK);
 
-        canvas.drawText(String.format("Avg RGB: R=%d, G=%d, B=%d", avgR, avgG, avgB), 30, 60, textPaint);
-        canvas.drawText(String.format("Gray = %.2f", yValue), 30, 110, textPaint);
-        canvas.drawText(String.format("EXIF BV = %s", exifBrightness), 30, 170, textPaint);
+        CurveParams curve = activeCurveParams != null && activeCurveParams.isValid()
+                ? activeCurveParams
+                : CurveParams.prior();
 
-        String lResult;
-        if (!Float.isNaN(bv)) {
-            double L = computeLFromBv(bv, activeCurveParams);
-            CurveParams curve = activeCurveParams != null ? activeCurveParams : CurveParams.prior();
-            lResult = String.format("L = %.3f × exp(%.3f×BV) = %.2f", curve.a, curve.b, L);
+        double centerDn = computeCenterRegionMeanDn(originalBitmap);
+        String dnStr = Double.isFinite(centerDn)
+                ? String.format(Locale.US, "%.1f", centerDn)
+                : "—";
+
+        String exifLine = (exifBrightness != null && !exifBrightness.isEmpty()) ? exifBrightness : "—";
+
+        String curveFormulaLine = String.format(Locale.US,
+                "标定曲线: L = %.4f × exp(%.4f × BV) cd/m²",
+                curve.a, curve.b);
+        String curveBvLine = "BV = log₂(DN/255)，DN 为 0–255 灰度";
+
+        String qualityMetric;
+        if (curve.source == CurveParams.Source.CALIBRATED) {
+            qualityMetric = String.format(Locale.US, "%.3f", curve.getRSquared());
+        } else if (curve.source == CurveParams.Source.CLOUD) {
+            qualityMetric = String.format(Locale.US, "%.2f", curve.getCloudConfidence());
         } else {
-            lResult = "L = N/A";
+            qualityMetric = "—";
         }
-        canvas.drawText(lResult, 30, 220, textPaint);
+        String qualityLine = curve.source == CurveParams.Source.CLOUD
+                ? String.format(Locale.CHINA, "置信度 = %s", qualityMetric)
+                : String.format(Locale.CHINA, "拟合优度 R² = %s", qualityMetric);
+
+        String sourceLine = formatCalibrationSourceLine(curve);
+
+        double centerL = Double.isFinite(centerDn) ? computeLFromDn(centerDn) : Double.NaN;
+        String centerLLine = Double.isFinite(centerL)
+                ? String.format(Locale.US, "中心亮度: %.1f cd/m²", centerL)
+                : "中心亮度: — cd/m²";
+
+        final float x = 30f;
+        float y = 52f;
+        final float lineStep = 48f;
+
+        canvas.drawText(String.format(Locale.getDefault(), "Avg RGB: R=%d, G=%d, B=%d", avgR, avgG, avgB), x, y, textPaint);
+        y += lineStep;
+        canvas.drawText(String.format(Locale.US, "Gray = %.2f | DN = %s", yValue, dnStr), x, y, textPaint);
+        y += lineStep;
+        canvas.drawText(String.format(Locale.CHINA, "EXIF BV = %s", exifLine), x, y, textPaint);
+        y += lineStep;
+        canvas.drawText(curveFormulaLine, x, y, textPaint);
+        y += lineStep;
+        canvas.drawText(curveBvLine, x, y, textPaint);
+        y += lineStep;
+        canvas.drawText(qualityLine, x, y, textPaint);
+        y += lineStep;
+        canvas.drawText(sourceLine, x, y, textPaint);
+        y += lineStep;
+        canvas.drawText(centerLLine, x, y, textPaint);
+    }
+
+    private static String formatCalibrationSourceLine(CurveParams curve) {
+        if (curve.source == CurveParams.Source.CALIBRATED) {
+            if (curve.updatedAt > 0L) {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA);
+                return String.format(Locale.CHINA, "来源: 本地标定 (%s)", sdf.format(new Date(curve.updatedAt)));
+            }
+            return "来源: 本地标定";
+        }
+        if (curve.source == CurveParams.Source.CLOUD) {
+            return String.format(Locale.CHINA, "来源: 云端标准曲线 (v%d, 置信%.2f, %d台)",
+                    curve.getCloudProfileVersion(),
+                    curve.getCloudConfidence(),
+                    curve.getCloudAggregatedDeviceCount());
+        }
+        return "来源: 先验曲线";
     }
     
     @Override
@@ -597,18 +689,61 @@ public class CameraModel implements CameraContract.Model {
         return activeCurveParams;
     }
 
+    /** 由中心 ROI 平均 DN 经当前活动曲线（标定或先验）得到亮度 L（cd/m²）。 */
+    public double computeLFromDn(double dn) {
+        CurveParams params = activeCurveParams != null && activeCurveParams.isValid()
+                ? activeCurveParams
+                : CurveParams.prior();
+        return params.computeL(dn);
+    }
+
     public void setActiveCurveParams(CurveParams params) {
         CurveParams effective = params != null && params.isValid() ? params : CurveParams.prior();
+        if (calibrationRepository != null && activeCurveParams != null && activeCurveParams.isValid()) {
+            boolean changed =
+                    effective.a != activeCurveParams.a
+                            || effective.b != activeCurveParams.b
+                            || effective.source != activeCurveParams.source;
+            if (changed) {
+                calibrationRepository.saveRollbackSnapshot(activeCurveParams);
+            }
+        }
         activeCurveParams = effective;
         if (calibrationRepository != null) {
             calibrationRepository.saveCurveParams(effective);
         }
     }
 
+    /** 从 SharedPreferences 重新加载曲线（云端异步拉取完成后调用）。 */
+    public void reloadActiveCurveFromRepository() {
+        if (calibrationRepository != null) {
+            activeCurveParams = calibrationRepository.loadCurveParams();
+        }
+    }
+
     public String getCurveSourceLabel() {
-        return activeCurveParams != null && activeCurveParams.source == CurveParams.Source.CALIBRATED
-                ? "已标定"
-                : "先验";
+        CurveParams c = activeCurveParams != null ? activeCurveParams : CurveParams.prior();
+        if (c.source == CurveParams.Source.CALIBRATED) {
+            return "已标定";
+        }
+        if (c.source == CurveParams.Source.CLOUD) {
+            return String.format(Locale.CHINA, "云端曲线·基于%d台设备", c.getCloudAggregatedDeviceCount());
+        }
+        return "先验公式";
+    }
+
+    /** 预览角标：来源 + 置信度 / R²。 */
+    public String getCurveBadgeShortLabel() {
+        CurveParams c = activeCurveParams != null ? activeCurveParams : CurveParams.prior();
+        if (c.source == CurveParams.Source.CALIBRATED) {
+            return String.format(Locale.CHINA, "已标定·R²%.2f", c.getRSquared());
+        }
+        if (c.source == CurveParams.Source.CLOUD) {
+            return String.format(Locale.CHINA, "云端·%d台·置信%.2f",
+                    c.getCloudAggregatedDeviceCount(),
+                    c.getCloudConfidence());
+        }
+        return "先验公式";
     }
 
     public void saveCalibrationSummary(String summary) {
@@ -619,5 +754,9 @@ public class CameraModel implements CameraContract.Model {
 
     public String getCalibrationSummary() {
         return calibrationRepository != null ? calibrationRepository.loadLastSessionSummary() : "";
+    }
+
+    public CalibrationRepository getCalibrationRepository() {
+        return calibrationRepository;
     }
 }

@@ -9,7 +9,10 @@ import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 
 import com.example.camera.R;
+import com.example.camera.calibration.model.CalibrationUploadData;
+import com.example.camera.calibration.model.CalibrationUploadPolicy;
 import com.example.camera.contract.CameraContract;
+import com.example.camera.data.CalibrationRepository;
 import com.example.camera.model.AppState;
 import com.example.camera.model.CameraModel;
 import com.example.camera.model.CameraSettings;
@@ -22,6 +25,7 @@ import com.example.camera.presenter.state.AutoTuneState;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -32,6 +36,10 @@ public class CameraPresenter implements CameraContract.Presenter {
     private static final int ISO_DEADBAND = 30;
     private static final long EXPOSURE_DEADBAND_NS = 500_000L;
     private static final double BV_DEADBAND = 0.15;
+    /**
+     * 预览中心 L 单独节流：比 {@link #BV_DEADBAND} 更敏感，避免与曝光推荐绑定导致数值长时间不动。
+     */
+    private static final double CENTER_L_DISPLAY_BV_DEADBAND = 0.04;
     private static final double AUTO_APPLY_BV_DELTA_THRESHOLD_DEFAULT = 0.2;
     private static final int AUTO_APPLY_STABLE_FRAME_COUNT_DEFAULT = 3;
     private static final long AUTO_APPLY_MIN_INTERVAL_MS = 500L;
@@ -52,8 +60,18 @@ public class CameraPresenter implements CameraContract.Presenter {
     private static final double CALIBRATION_MIN_BV_SPREAD = 0.5;
     private static final int CALIBRATION_STABILITY_WINDOW = 8;
     private static final double CALIBRATION_STABILITY_STD_MAX = 2.0;
+    /** 标定前最近若干次 lux 采样，用于方差稳定判定与拒绝突变。 */
+    private static final int CALIBRATION_LUX_STABILITY_WINDOW = 5;
+    private static final int CALIBRATION_LUX_STABILITY_MIN_SAMPLES = 3;
+    /** 允许变异系数 std/mean 的上限（与方差阈值 (relStd·mean)² 对应）。 */
+    private static final double CALIBRATION_LUX_REL_STD_MAX = 0.12;
+    /**
+     * 方差绝对上限（lux²），避免极暗环境下仅按相对阈值过严；约等价 σ≤8 lux。
+     */
+    private static final double CALIBRATION_LUX_MAX_VARIANCE_ABS = 64.0;
     private final CameraContract.View view;
     private final CameraContract.Model model;
+    private final Context appContext;
     private final ExecutorService analysisExecutor = Executors.newSingleThreadExecutor();
     private float aperture = 1.8f;
     private ImageAnalysis imageAnalysis;
@@ -64,9 +82,13 @@ public class CameraPresenter implements CameraContract.Presenter {
     private boolean deferHardwareApply = false;
     private boolean calibrationModeActive = false;
     private final CalibrationSession calibrationSession = new CalibrationSession();
+    private final Deque<Double> recentLuxCalib = new ArrayDeque<>();
+    private final Object luxStabilityLock = new Object();
     private final Deque<Double> recentMeanY = new ArrayDeque<>();
-    private double latestMeanY = Double.NaN;
-    private double latestSceneBv = Double.NaN;
+    private volatile double latestMeanY = Double.NaN;
+    private volatile double latestSceneBv = Double.NaN;
+    /** 与 {@link #latestMeanY} / {@link #latestSceneBv} 同一帧分析时刻的墙上时钟（ms），用于与传感器时间对齐。 */
+    private volatile long latestFrameStatsWallTimeMs = 0L;
     private long lastCalibrationSampleTs = 0L;
     /**
      * 用于“拍照离线伪彩色”和“预览端伪彩色”保持一致：
@@ -78,6 +100,8 @@ public class CameraPresenter implements CameraContract.Presenter {
     private float previewHueMinSmoothed = 0f;
     private float previewHueMaxSmoothed = 1f;
     private boolean previewHueRangeInitialized = false;
+    /** 上一档已显示的中心 L 对应 BV（{@link #CENTER_L_DISPLAY_BV_DEADBAND} 节流）。 */
+    private double lastEmittedCenterLBv = Double.NaN;
     private static final float PREVIEW_HUE_RANGE_EMA = 0.2f;
     private final AutoTuneState autoTuneState = new AutoTuneState(
             AUTO_APPLY_STABLE_FRAME_COUNT_DEFAULT,
@@ -87,6 +111,7 @@ public class CameraPresenter implements CameraContract.Presenter {
     
     public CameraPresenter(CameraContract.View view, Context context) {
         this.view = view;
+        this.appContext = context != null ? context.getApplicationContext() : null;
         this.model = new CameraModel(context);
     }
 
@@ -108,6 +133,7 @@ public class CameraPresenter implements CameraContract.Presenter {
         view.updatePhotoCount(appState.getPhotoCount());
         view.updateExposureValue("E = --");
         view.updateCurveSource(getCurveSourceLabel());
+        view.updateCurveSourceBadge(getModel().getCurveBadgeShortLabel());
         String summary = getModel().getCalibrationSummary();
         view.updateCalibrationStatus(summary.isEmpty() ? "标定模式未开始" : summary);
     }
@@ -218,12 +244,17 @@ public class CameraPresenter implements CameraContract.Presenter {
         imageAnalysis.setAnalyzer(analysisExecutor, image -> {
             try {
                 CameraModel.ExposureRecommendation recommendation = analyzeExposureRecommendation(image);
-                latestMeanY = estimateMeanLuma(image);
+                double meanY = estimateMeanLuma(image);
+                latestMeanY = meanY;
+                long frameWallMs = System.currentTimeMillis();
+                latestFrameStatsWallTimeMs = frameWallMs;
                 updatePreviewHueRangeFromAnalysis(image);
                 if (recommendation != null) {
                     latestSceneBv = recommendation.currentSceneBV;
-                    updateStability(latestMeanY);
-                    handleExposureRecommendation(recommendation);
+                    updateStability(meanY);
+                    handleExposureRecommendation(recommendation, meanY);
+                } else {
+                    maybeEmitCenterLDisplayThrottled(meanY);
                 }
             } finally {
                 image.close();
@@ -233,6 +264,11 @@ public class CameraPresenter implements CameraContract.Presenter {
 
     public ImageAnalysis getImageAnalysis() {
         return imageAnalysis;
+    }
+
+    /** Debug：ImageAnalysis 估计的中心 ROI 平均 Y（0–255）。 */
+    public double getLatestCenterMeanYForDebug() {
+        return latestMeanY;
     }
 
     @Override
@@ -356,7 +392,7 @@ public class CameraPresenter implements CameraContract.Presenter {
         return ((CameraModel) model).analyzeFrameForAutoExposure(image);
     }
 
-    private void handleExposureRecommendation(CameraModel.ExposureRecommendation recommendation) {
+    private void handleExposureRecommendation(CameraModel.ExposureRecommendation recommendation, double meanY) {
         lastRecommendation = recommendation;
         if (shouldEmitRecommendation(recommendation)) {
             lastEmittedRecommendation = recommendation;
@@ -364,7 +400,36 @@ public class CameraPresenter implements CameraContract.Presenter {
                 view.onExposureRecommendationChanged(recommendation);
             }
         }
+        maybeEmitCenterLDisplayThrottled(meanY);
         maybeAutoApplyFromAnalyzer(recommendation);
+    }
+
+    /** 中心 L 与曝光推荐解耦，仅用较小 BV 死区节流，避免 UI 每帧刷新。 */
+    private void maybeEmitCenterLDisplayThrottled(double meanY) {
+        if (!(model instanceof CameraModel) || !Double.isFinite(meanY)) {
+            return;
+        }
+        double bv = CurveParams.bvFromDn(meanY);
+        if (!Double.isFinite(bv)) {
+            return;
+        }
+        if (!Double.isFinite(lastEmittedCenterLBv)
+                || Math.abs(bv - lastEmittedCenterLBv) >= CENTER_L_DISPLAY_BV_DEADBAND) {
+            emitCenterLFromMeanY(meanY);
+        }
+    }
+
+    private void emitCenterLFromMeanY(double meanY) {
+        double bv = CurveParams.bvFromDn(meanY);
+        if (Double.isFinite(bv)) {
+            lastEmittedCenterLBv = bv;
+        }
+        if (!(model instanceof CameraModel)) {
+            view.updateCenterLuminance(Double.NaN, meanY);
+            return;
+        }
+        double l = ((CameraModel) model).computeLFromDn(meanY);
+        view.updateCenterLuminance(l, meanY);
     }
 
     public void applyLatestExposureRecommendation() {
@@ -538,7 +603,68 @@ public class CameraPresenter implements CameraContract.Presenter {
         calibrationSession.setStatus(CalibrationSession.Status.SAMPLING);
         lastCalibrationSampleTs = 0L;
         recentMeanY.clear();
+        synchronized (luxStabilityLock) {
+            recentLuxCalib.clear();
+        }
         view.updateCalibrationStatus("标定中：请对准灰卡并点击“采样”至少8次，建议缓慢调整曝光后再采样");
+    }
+
+    /**
+     * 由界面层 {@link com.example.camera.sensor.LightSensorManager} 回调传入；仅在标定模式写入会话参考亮度并维护 lux 稳定窗口。
+     */
+    public void onAmbientLightSampleForCalibration(float lux, double luminanceCdM2) {
+        if (!calibrationModeActive || !Float.isFinite(lux) || !Double.isFinite(luminanceCdM2)) {
+            return;
+        }
+        calibrationSession.updateReferenceL(luminanceCdM2);
+        synchronized (luxStabilityLock) {
+            recentLuxCalib.addLast((double) lux);
+            while (recentLuxCalib.size() > CALIBRATION_LUX_STABILITY_WINDOW) {
+                recentLuxCalib.removeFirst();
+            }
+        }
+    }
+
+    /**
+     * 使用窗口内 lux 的样本方差判定稳定：s² = Σ(x-μ)²/(n-1)，要求 s² ≤ max(绝对上限, (relStd·μ)²)。
+     */
+    private boolean isAmbientLuxStableForCalibration() {
+        synchronized (luxStabilityLock) {
+            int n = recentLuxCalib.size();
+            if (n < CALIBRATION_LUX_STABILITY_MIN_SAMPLES) {
+                return false;
+            }
+            double sum = 0.0;
+            for (double v : recentLuxCalib) {
+                sum += v;
+            }
+            double mean = sum / n;
+            if (mean <= 1e-6) {
+                return false;
+            }
+            double sumSqDiff = 0.0;
+            for (double v : recentLuxCalib) {
+                double d = v - mean;
+                sumSqDiff += d * d;
+            }
+            double sampleVar = sumSqDiff / (n - 1);
+            if (!Double.isFinite(sampleVar)) {
+                return false;
+            }
+            double varThreshold = Math.max(
+                    CALIBRATION_LUX_MAX_VARIANCE_ABS,
+                    CALIBRATION_LUX_REL_STD_MAX * mean * CALIBRATION_LUX_REL_STD_MAX * mean
+            );
+            return sampleVar <= varThreshold;
+        }
+    }
+
+    @Override
+    public boolean isAmbientLuxStable() {
+        if (!calibrationModeActive) {
+            return true;
+        }
+        return isAmbientLuxStableForCalibration();
     }
 
     @Override
@@ -552,23 +678,37 @@ public class CameraPresenter implements CameraContract.Presenter {
             view.updateCalibrationStatus("采样过快，请稍等再采样");
             return;
         }
-        lastCalibrationSampleTs = now;
         if (!Double.isFinite(latestSceneBv) || !Double.isFinite(latestMeanY)) {
             view.updateCalibrationStatus("当前帧数据无效，请稍后重试");
+            return;
+        }
+        double refL = calibrationSession.getCurrentReferenceL();
+        if (!Double.isFinite(refL) || refL <= 0.0) {
+            if (appContext != null) {
+                view.showToast(appContext.getString(R.string.calibration_capture_no_ambient));
+            } else {
+                view.showToast("无法获取环境光照度，请检查光线传感器或移动手机位置");
+            }
+            return;
+        }
+        if (!isAmbientLuxStableForCalibration()) {
+            if (appContext != null) {
+                view.updateCalibrationStatus(appContext.getString(R.string.calibration_ambient_unstable));
+            } else {
+                view.updateCalibrationStatus("环境光照度变化较快，请保持稳定后重试采样");
+            }
             return;
         }
         boolean stable = isFrameStable();
         boolean validExposure = latestMeanY > 12 && latestMeanY < 245;
         boolean valid = stable && validExposure;
-        double referenceL = Math.max(1.0, latestMeanY / 255.0 * 100.0);
-        CalibrationSample sample = new CalibrationSample(
-                latestSceneBv,
-                referenceL,
-                latestMeanY,
-                now,
-                valid
-        );
-        calibrationSession.addSample(sample);
+        long frameAt = latestFrameStatsWallTimeMs;
+        String err = calibrationSession.captureSample(latestMeanY, latestSceneBv, frameAt, valid);
+        if (err != null) {
+            view.updateCalibrationStatus(err);
+            return;
+        }
+        lastCalibrationSampleTs = now;
         int validCount = calibrationSession.getValidSampleCount();
         String quality = !stable ? "抖动" : (validExposure ? "有效" : "过曝/欠曝");
         view.updateCalibrationStatus("采样完成: " + validCount + "/" + CALIBRATION_MIN_SAMPLES + "，质量=" + quality);
@@ -591,12 +731,28 @@ public class CameraPresenter implements CameraContract.Presenter {
         calibrationSession.setStatus(CalibrationSession.Status.DONE);
         calibrationSession.setFittedParams(fitted);
         getModel().setActiveCurveParams(fitted);
-        String summary = String.format(
-                "标定完成: a=%.4f, b=%.4f, 样本=%d",
-                fitted.a, fitted.b, calibrationSession.getValidSampleCount());
+        int removed = fitted.getCalibrationOutliersRemoved();
+        int kept = calibrationSession.getSamples().size();
+        String summary = buildCalibrationSuccessMessage(fitted, kept, removed);
         getModel().saveCalibrationSummary(summary);
         view.updateCurveSource(getCurveSourceLabel());
+        view.updateCurveSourceBadge(getModel().getCurveBadgeShortLabel());
         view.updateCalibrationStatus(summary);
+        int fitN = fitted.getFitSampleCount();
+        double r2 = fitted.getRSquared();
+        double pa = fitted.a;
+        double pb = fitted.b;
+        // 步骤 5.5：先筛参数异常，再筛 LOW（R² / 样本数），最后才进入 HIGH/MEDIUM 分享流程
+        if (CalibrationUploadPolicy.INSTANCE.isAbnormalParams(pa, pb)) {
+            view.onCalibrationAbnormalComplete(fitted);
+        } else if (fitN < CalibrationUploadPolicy.MIN_SAMPLE_COUNT_FOR_UPLOAD
+                || !Double.isFinite(r2)
+                || r2 < CalibrationUploadPolicy.MIN_R_SQUARED_FOR_UPLOAD) {
+            view.onCalibrationLowQualityComplete(fitted);
+        } else {
+            String qualityTier = CalibrationUploadPolicy.INSTANCE.qualityFor(fitN, r2);
+            view.onCalibrationHighMediumComplete(fitted, qualityTier);
+        }
         calibrationModeActive = false;
     }
 
@@ -730,7 +886,47 @@ public class CameraPresenter implements CameraContract.Presenter {
     }
 
     private CurveParams fitCurveParams(List<CalibrationSample> samples) {
-        return CalibrationFitter.fitExpCurve(samples, CALIBRATION_MIN_SAMPLES, CALIBRATION_MIN_BV_SPREAD);
+        CalibrationFitter.FitResult result = CalibrationFitter.fitExpCurveResult(
+                samples, CALIBRATION_MIN_SAMPLES, CALIBRATION_MIN_BV_SPREAD);
+        if (result == null) {
+            return null;
+        }
+        CurveParams params = result.getCurveParams();
+        if (params != null && params.isValid()) {
+            calibrationSession.retainOnlySamplesUsed(result.getSamplesUsed());
+        }
+        return params;
+    }
+
+    /**
+     * 标定成功后的多行说明：拟合公式（BV–L，与 CameraModel 一致）、R²、保留样本数及 DN 示例亮度（cd/m²）。
+     */
+    private String buildCalibrationSuccessMessage(CurveParams fitted, int kept, int removed) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format(Locale.US,
+                "拟合公式: L = %.4f × exp(%.4f × BV) cd/m²\nBV = log₂(DN/255)，DN 为 0–255 灰度\n",
+                fitted.a, fitted.b));
+        sb.append(String.format(Locale.US, "拟合优度 R² = %.3f\n", fitted.getRSquared()));
+        sb.append(String.format(Locale.getDefault(), "保留样本=%d", kept));
+        if (removed > 0) {
+            sb.append(String.format(Locale.getDefault(), "，已剔除异常点=%d", removed));
+        }
+        if (fitted.isValid()) {
+            int[] dns = new int[]{50, 128, 200};
+            String[] labels = new String[]{"暗部", "中灰", "高光"};
+            StringBuilder examples = new StringBuilder();
+            for (int i = 0; i < dns.length; i++) {
+                double l = fitted.computeL(dns[i]);
+                if (Double.isFinite(l)) {
+                    examples.append(String.format(Locale.US, "\n· DN=%d → %.1f cd/m² (%s)",
+                            dns[i], l, labels[i]));
+                }
+            }
+            if (examples.length() > 0) {
+                sb.append("\n\n示例亮度:").append(examples);
+            }
+        }
+        return "标定完成\n\n" + sb;
     }
 
     private double estimateMeanLuma(ImageProxy image) {
@@ -844,5 +1040,17 @@ public class CameraPresenter implements CameraContract.Presenter {
         CurveParams params = getModel().getActiveCurveParams();
         return getModel().getCurveSourceLabel()
                 + String.format(" (a=%.3f, b=%.3f)", params.a, params.b);
+    }
+
+    /** 供界面层保存分享记录等复用同一持久化实例。 */
+    public CalibrationRepository getCalibrationRepository() {
+        return getModel().getCalibrationRepository();
+    }
+
+    /** 云端标准曲线异步拉取完成后刷新内存与 UI。 */
+    public void refreshCurveFromDisk() {
+        getModel().reloadActiveCurveFromRepository();
+        view.updateCurveSource(getCurveSourceLabel());
+        view.updateCurveSourceBadge(getModel().getCurveBadgeShortLabel());
     }
 }

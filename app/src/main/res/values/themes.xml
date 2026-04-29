@@ -15,4 +15,22 @@
     </style>
 
     <style name="Theme.MyApplication" parent="Base.Theme.MyApplication" />
+
+    <!-- 传感器校准页：正文与系统控件默认前景为白 -->
+    <style name="Theme.SensorCalibration" parent="Theme.MyApplication">
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/white</item>
+        <item name="android:textColorTertiary">@color/text_secondary</item>
+        <item name="colorOnSurface">@color/white</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="android:editTextColor">@color/white</item>
+    </style>
+
+    <!-- Debug：后台数据统计页（白字 + Material 对话框继承） -->
+    <style name="Theme.DebugStats" parent="Theme.MyApplication">
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/white</item>
+        <item name="colorOnSurface">@color/white</item>
+        <item name="colorOnSurfaceVariant">@color/white</item>
+    </style>
 </resources>

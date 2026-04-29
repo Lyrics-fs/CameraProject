@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path name="debug_calibration" path="debug_calibration/" />
+    <cache-path name="debug_stats_export" path="debug_stats/" />
+</paths>

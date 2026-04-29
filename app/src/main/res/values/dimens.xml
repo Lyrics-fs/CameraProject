@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <dimen name="layout_spacing_unit">8dp</dimen>
+    <!-- 预览左下角控制列：WRAP_CONTENT 时不超过此宽度（收起时尽量少占预览） -->
+    <dimen name="left_preview_controls_max_width">260dp</dimen>
+    <!-- Debug：亮度计校准或标定条任一展开时，左列统一用此宽度（与标定区一致） -->
+    <dimen name="left_preview_controls_width_expanded_debug">340dp</dimen>
 </resources>

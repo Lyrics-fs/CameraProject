@@ -4,6 +4,7 @@ import android.graphics.Bitmap;
 import com.example.camera.model.CameraSettings;
 import com.example.camera.model.AppState;
 import com.example.camera.model.CameraModel;
+import com.example.camera.model.calibration.CurveParams;
 
 /**
  * MVP模式的契约接口
@@ -27,10 +28,30 @@ public interface CameraContract {
         void updateExposureDisplay(String exposureText);
         void updateBrightnessMode(String mode);
         void updateExposureValue(String exposureValue);
+        /**
+         * 预览中心 ROI 对应的亮度 L（cd/m²）；无效时为 NaN。
+         * {@code centerMeanDn} 用于可选的色调映射（与测光 DN 一致）。
+         */
+        void updateCenterLuminance(double lCdPerM2, double centerMeanDn);
         void onExposureRecommendationChanged(CameraModel.ExposureRecommendation recommendation);
         void requestAutoApplyRecommendation();
         void updateCalibrationStatus(String text);
         void updateCurveSource(String source);
+        /** 预览角标：曲线来源与置信度 / R²。 */
+        void updateCurveSourceBadge(String badgeText);
+
+        /**
+         * 步骤 5.5：统计质量不足（R² 或采样数未达标），仅 Toast + 本地留存 LOW，不进入分享流程。
+         */
+        void onCalibrationLowQualityComplete(CurveParams fitted);
+        /**
+         * 步骤 5.5：拟合参数异常（如 a≤0 或 b 超出合理区间），仅 Toast + 本地留存 ABNORMAL，不进入分享流程。
+         */
+        void onCalibrationAbnormalComplete(CurveParams fitted);
+        /**
+         * 标定质量为 HIGH/MEDIUM：由界面层结合 DataStore 决定是否弹出分享授权或静默保存。
+         */
+        void onCalibrationHighMediumComplete(CurveParams fitted, String qualityTier);
         
         // SeekBar控制
         void resetSeekBars();
@@ -90,6 +111,8 @@ public interface CameraContract {
         void captureCalibrationSample();
         void finishCalibration();
         boolean isCalibrationModeActive();
+        /** 标定模式下 lux 窗口是否稳定（方差在阈值内）；非标定模式下视为 true。 */
+        boolean isAmbientLuxStable();
     }
     
     /**

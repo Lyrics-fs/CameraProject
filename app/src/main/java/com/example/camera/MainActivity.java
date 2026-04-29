@@ -1,7 +1,10 @@
 package com.example.camera;
 
 import android.Manifest;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -23,10 +26,13 @@ import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.ScrollView;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
@@ -34,6 +40,7 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.activity.result.ActivityResultLauncher;
@@ -50,15 +57,32 @@ import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
 
+import com.example.camera.sync.StandardCurveSync;
+import androidx.core.content.FileProvider;
 import android.hardware.camera2.CaptureRequest;
+import android.graphics.drawable.GradientDrawable;
 
+import com.example.camera.calibration.CalibrationUploadDataFactory;
+import com.example.camera.calibration.model.CalibrationUploadData;
 import com.example.camera.contract.CameraContract;
+import com.example.camera.data.CalibrationShareRepository;
 import com.example.camera.data.ImageRepository;
+import com.example.camera.debug.DebugCalibrationCsvRecorder;
+import com.example.camera.debug.DebugLuxCalibrationAnalyzer;
 import com.example.camera.model.CameraModel;
+import com.example.camera.model.calibration.CurveParams;
 import com.example.camera.presenter.CameraPresenter;
+import com.example.camera.sensor.AmbientLightReading;
+import com.example.camera.sensor.LightSensorManager;
+import com.example.camera.sensor.SensorCalibrationStore;
 import com.google.common.util.concurrent.ListenableFuture;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -74,6 +98,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private static final String KEY_BV_THRESHOLD_MILLI = "bv_threshold_milli";
     private static final String KEY_ADVANCED_TUNING_EXPANDED = "advanced_tuning_expanded";
     private static final String KEY_CALIBRATION_BAR_EXPANDED = "calibration_bar_expanded";
+    private static final String KEY_METER_CALIBRATION_EXPANDED = "meter_calibration_expanded";
     private static final int[] STABLE_FRAME_OPTIONS = new int[]{3, 4, 5};
     private static final int[] AUTO_STEP_PERCENT_OPTIONS = new int[]{20, 25, 30};
     private static final int[] BV_THRESHOLD_MILLI_OPTIONS = new int[]{150, 200, 250};
@@ -87,6 +112,9 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private boolean isCapturing = false;
     private ImageView imageView;
     private TextView tvBrightnessValue;
+    private TextView tvCenterLuminance;
+    /** 预览左上 HUD：传感器当前照度（lux / 换算 cd/m²），标定条收起时仍更新 */
+    private TextView tvPreviewAmbientLux;
     private TextView tvExposureLabel;
     private TextView tvIsoLabel;
     private TextView tvBrightnessLabel;
@@ -94,6 +122,8 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private TextView tvAutoExposureRecommendation;
     private TextView tvCalibrationStatus;
     private TextView tvCurveSource;
+    private TextView tvCurveSourceBadge;
+    private BroadcastReceiver curveSyncReceiver;
     private FrameLayout previewLoadingOverlay;
     private ProgressBar previewLoadingProgress;
     private TextView previewLoadingText;
@@ -112,6 +142,20 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private Button btnFinishCalibration;
     private Button btnToggleCalibrationBar;
     private View calibrationActionsRow;
+    private View calibrationSensorInfo;
+    private View calibrationSensorIndicator;
+    private TextView tvCalibrationAmbient;
+    private Button btnSensorCalibration;
+    private View panelDebugCalibrationRecorder;
+    private Button btnToggleMeterCalibration;
+    private View meterCalibrationExpandContent;
+    /** 左下预览控制列（Debug 下展开亮度计校准时放宽 maxWidth）。 */
+    private View leftPreviewControlsColumn;
+    private LightSensorManager lightSensorManager;
+    private DebugCalibrationCsvRecorder debugCsvRecorder;
+    @Nullable
+    private AmbientLightReading lastAmbientReading;
+    private long lastLuxRangeWarningToastMs = 0L;
     private LinearLayout dockMainActionsRow;
     private LinearLayout manualControlsContainer;
     private View advancedTuningContainer;
@@ -133,6 +177,8 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private boolean isProgrammaticSeekBarUpdate = false;
     private boolean isRecommendationMode = false;
     private boolean isAdvancedTuningExpanded = false;
+    /** Debug：亮度计校准面板是否展开（与标定条折叠无关）。 */
+    private boolean isMeterCalibrationExpanded = true;
     private boolean calibrationBarExpanded = true;
     private boolean isCameraStartPending = false;
 
@@ -146,6 +192,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private long currentExposure = -1;
 
     private final Executor captureExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService shareFlowExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable applyCameraOptionsRunnable = this::applyCamera2Options;
     private final long cameraOptionThrottleMs = BuildConfig.DEBUG
@@ -176,6 +223,8 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         captureButton     = findViewById(R.id.btn);
         imageView         = findViewById(R.id.iv);
         tvBrightnessValue = findViewById(R.id.tv_display_value);
+        tvCenterLuminance = findViewById(R.id.tvCenterLuminance);
+        tvPreviewAmbientLux = findViewById(R.id.tv_preview_ambient_lux);
         tvExposureLabel   = findViewById(R.id.tv_exposure);
         tvIsoLabel        = findViewById(R.id.tv_iso);
         tvBrightnessLabel = findViewById(R.id.tv_brightness_label);
@@ -183,6 +232,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         tvAutoExposureRecommendation = findViewById(R.id.tv_auto_exposure_recommendation);
         tvCalibrationStatus = findViewById(R.id.tv_calibration_status);
         tvCurveSource = findViewById(R.id.tv_curve_source);
+        tvCurveSourceBadge = findViewById(R.id.tv_curve_source_badge);
         previewLoadingOverlay = findViewById(R.id.preview_loading_overlay);
         previewLoadingProgress = findViewById(R.id.preview_loading_progress);
         previewLoadingText = findViewById(R.id.preview_loading_text);
@@ -201,9 +251,15 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         btnFinishCalibration = findViewById(R.id.btn_finish_calibration);
         btnToggleCalibrationBar = findViewById(R.id.btn_toggle_calibration_bar);
         calibrationActionsRow = findViewById(R.id.calibration_actions_row);
+        calibrationSensorInfo = findViewById(R.id.calibration_sensor_info);
+        calibrationSensorIndicator = findViewById(R.id.calibration_sensor_indicator);
+        tvCalibrationAmbient = findViewById(R.id.tv_calibration_ambient);
+        lightSensorManager = new LightSensorManager(this);
+        lightSensorManager.getAmbientLightLiveData().observe(this, this::onAmbientLightReading);
         dockMainActionsRow = findViewById(R.id.dock_main_actions_row);
         manualControlsContainer = findViewById(R.id.manual_controls_container);
         advancedTuningContainer = findViewById(R.id.advanced_tuning_container);
+        leftPreviewControlsColumn = findViewById(R.id.left_preview_controls_column);
         seekBarBrightness = findViewById(R.id.seekBarBrightness);
         seekBarIso        = findViewById(R.id.seekBarIso);
         seekBarExposure   = findViewById(R.id.seekBarExposure);
@@ -215,15 +271,39 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         if (btnUserHelp != null) {
             btnUserHelp.setOnClickListener(v -> showUserHelpDialog());
         }
+        View btnSettings = findViewById(R.id.btn_settings);
+        if (btnSettings != null) {
+            btnSettings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
+        }
         setupRecommendationControls();
         presenter = new CameraPresenter(this, this);
         imageRepository = new ImageRepository(this);
         presenter.onViewCreated();
+        curveSyncReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (presenter != null) {
+                    presenter.refreshCurveFromDisk();
+                }
+            }
+        };
+        ContextCompat.registerReceiver(
+                this,
+                curveSyncReceiver,
+                new IntentFilter(StandardCurveSync.ACTION_CURVE_PROFILE_UPDATED),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
         setupSeekBarMicroInteractions();
         loadRecommendationPrefs();
         updateControlModeUI();
         updateCalibrationButtons();
         requestCameraPermissionIfNeeded();
+        debugCsvRecorder = new DebugCalibrationCsvRecorder(this);
+        if (BuildConfig.DEBUG) {
+            setupDebugCalibrationRecorder();
+            if (panelDebugCalibrationRecorder != null) {
+                panelDebugCalibrationRecorder.setVisibility(View.VISIBLE);
+            }
+        }
     }
 
     private void setPreviewLoading(boolean loading, String message) {
@@ -296,13 +376,19 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             }
         });
         btnStartCalibration.setOnClickListener(v -> {
+            if (lightSensorManager == null || !lightSensorManager.hasLightSensor()) {
+                showToast(getString(R.string.calibration_no_light_sensor));
+                return;
+            }
             presenter.startCalibration();
             updateCalibrationButtons();
+            refreshAmbientLightSensor();
         });
         btnCaptureCalibration.setOnClickListener(v -> presenter.captureCalibrationSample());
         btnFinishCalibration.setOnClickListener(v -> {
             presenter.finishCalibration();
             updateCalibrationButtons();
+            refreshAmbientLightSensor();
         });
         btnToggleCalibrationBar.setOnClickListener(v -> {
             calibrationBarExpanded = !calibrationBarExpanded;
@@ -323,6 +409,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                 sharedPreferences.getInt(KEY_BV_THRESHOLD_MILLI, BV_THRESHOLD_MILLI_OPTIONS[1]));
         presenter.setAutoApplyBvDeltaThreshold(bvThresholdMilli / 1000.0);
         calibrationBarExpanded = sharedPreferences.getBoolean(KEY_CALIBRATION_BAR_EXPANDED, true);
+        isMeterCalibrationExpanded = sharedPreferences.getBoolean(KEY_METER_CALIBRATION_EXPANDED, true);
         refreshAdvancedTuningButtonLabels();
         applyCalibrationBarExpanded(calibrationBarExpanded, false);
     }
@@ -934,6 +1021,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         sp.edit().putBoolean(KEY_ADVANCED_TUNING_EXPANDED, isAdvancedTuningExpanded).apply();
     }
 
+    private void persistMeterCalibrationExpanded() {
+        SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        sp.edit().putBoolean(KEY_METER_CALIBRATION_EXPANDED, isMeterCalibrationExpanded).apply();
+    }
+
     private void persistStableFrames(int stableFrames) {
         SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         sp.edit().putInt(KEY_STABLE_FRAMES, stableFrames).apply();
@@ -1026,8 +1118,12 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
 
     private void applyCalibrationBarExpanded(boolean expanded, boolean persistPrefs) {
         calibrationBarExpanded = expanded;
+        int vis = expanded ? View.VISIBLE : View.GONE;
+        if (calibrationSensorInfo != null) {
+            calibrationSensorInfo.setVisibility(vis);
+        }
         if (calibrationActionsRow != null) {
-            calibrationActionsRow.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            calibrationActionsRow.setVisibility(vis);
         }
         if (btnToggleCalibrationBar != null) {
             btnToggleCalibrationBar.setText(expanded ? "收起标定 ▴" : "标定 ▾");
@@ -1037,12 +1133,109 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                     .putBoolean(KEY_CALIBRATION_BAR_EXPANDED, expanded)
                     .apply();
         }
+        refreshAmbientLightSensor();
+        applyLeftPreviewControlsColumnMaxWidth();
+    }
+
+    private void setCalibrationSensorIndicatorColor(int color) {
+        if (calibrationSensorIndicator == null) {
+            return;
+        }
+        android.graphics.drawable.Drawable bg = calibrationSensorIndicator.getBackground();
+        if (bg instanceof GradientDrawable) {
+            ((GradientDrawable) bg.mutate()).setColor(color);
+        } else {
+            calibrationSensorIndicator.setBackgroundColor(color);
+        }
+    }
+
+    /**
+     * 有环境光传感器时在界面前台持续注册监听（预览左上照度 + 标定区读数）；无传感器则停止。
+     * 标定条展开或标定进行中时指示点为橙色，否则为灰色。onPause 统一 {@link LightSensorManager#stopListening()}。
+     */
+    private void refreshAmbientLightSensor() {
+        if (lightSensorManager == null || tvCalibrationAmbient == null) {
+            return;
+        }
+        boolean calibrationUiActive = calibrationBarExpanded
+                || (presenter != null && presenter.isCalibrationModeActive());
+        if (!lightSensorManager.hasLightSensor()) {
+            lightSensorManager.stopListening();
+            String msg = lightSensorManager.getUnavailableDisplayMessage(this);
+            String ambientMsg = msg != null ? msg : getString(R.string.calibration_ambient_placeholder);
+            tvCalibrationAmbient.setText(ambientMsg);
+            if (tvPreviewAmbientLux != null) {
+                tvPreviewAmbientLux.setText(ambientMsg);
+            }
+            setCalibrationSensorIndicatorColor(ContextCompat.getColor(this, R.color.error_text));
+            updateCalibrationButtons();
+            return;
+        }
+        lightSensorManager.startListening(null);
+        tvCalibrationAmbient.setText(R.string.calibration_ambient_placeholder);
+        if (tvPreviewAmbientLux != null) {
+            tvPreviewAmbientLux.setText(R.string.calibration_ambient_placeholder);
+        }
+        setCalibrationSensorIndicatorColor(ContextCompat.getColor(
+                this,
+                calibrationUiActive ? R.color.accent_orange : R.color.text_label));
+        updateCalibrationButtons();
+    }
+
+    private void maybeToastLuxRange(float lux) {
+        long now = System.currentTimeMillis();
+        if (now - lastLuxRangeWarningToastMs < 5000L) {
+            return;
+        }
+        if (lux < 10f) {
+            lastLuxRangeWarningToastMs = now;
+            showToast(getString(R.string.calibration_lux_too_low));
+        } else if (lux > 50000f) {
+            lastLuxRangeWarningToastMs = now;
+            showToast(getString(R.string.calibration_lux_too_high));
+        }
+    }
+
+    /**
+     * 由 {@link LightSensorManager#getAmbientLightLiveData()} 推送（已节流），主线程回调，无需再 post。
+     */
+    private void onAmbientLightReading(@Nullable AmbientLightReading reading) {
+        if (reading != null
+                && Float.isFinite(reading.lux)
+                && Double.isFinite(reading.luminanceCdM2)) {
+            lastAmbientReading = reading;
+            String line = getString(
+                    R.string.calibration_ambient_format, reading.lux, reading.luminanceCdM2);
+            if (tvPreviewAmbientLux != null) {
+                tvPreviewAmbientLux.setText(line);
+            }
+            if (tvCalibrationAmbient != null) {
+                tvCalibrationAmbient.setText(line);
+            }
+            setCalibrationSensorIndicatorColor(ContextCompat.getColor(this, R.color.accent_green));
+            if (calibrationBarExpanded
+                    || (presenter != null && presenter.isCalibrationModeActive())) {
+                maybeToastLuxRange(reading.lux);
+            }
+            if (presenter != null) {
+                presenter.onAmbientLightSampleForCalibration(reading.lux, reading.luminanceCdM2);
+            }
+            if (presenter != null && presenter.isCalibrationModeActive()) {
+                updateCalibrationButtons();
+            }
+        } else {
+            if (tvPreviewAmbientLux != null) {
+                tvPreviewAmbientLux.setText(R.string.calibration_ambient_placeholder);
+            }
+        }
     }
 
     private void updateCalibrationButtons() {
+        boolean hasSensor = lightSensorManager != null && lightSensorManager.hasLightSensor();
         boolean active = presenter != null && presenter.isCalibrationModeActive();
-        btnStartCalibration.setEnabled(!active);
-        btnCaptureCalibration.setEnabled(active);
+        boolean luxStable = presenter == null || presenter.isAmbientLuxStable();
+        btnStartCalibration.setEnabled(!active && hasSensor);
+        btnCaptureCalibration.setEnabled(active && hasSensor && luxStable);
         btnFinishCalibration.setEnabled(active);
     }
 
@@ -1057,6 +1250,51 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                 isAdvancedTuningExpanded ? "高级参数 ▴" : "高级参数 ▾");
     }
 
+    private void updateMeterCalibrationExpandUi() {
+        if (BuildConfig.DEBUG && btnToggleMeterCalibration != null && meterCalibrationExpandContent != null) {
+            meterCalibrationExpandContent.setVisibility(
+                    isMeterCalibrationExpanded ? View.VISIBLE : View.GONE);
+            btnToggleMeterCalibration.setText(isMeterCalibrationExpanded
+                    ? getString(R.string.meter_calibration_toggle_collapse)
+                    : getString(R.string.meter_calibration_toggle_expand));
+        }
+        applyLeftPreviewControlsColumnMaxWidth();
+    }
+
+    /**
+     * Debug：亮度计校准与标定条共用左列宽度——任一展开则统一拉宽；二者皆收起则 WRAP_CONTENT
+     *（由 XML maxWidth 封顶），尽量少占预览。Release 始终 WRAP_CONTENT。
+     */
+    private void applyLeftPreviewControlsColumnMaxWidth() {
+        if (leftPreviewControlsColumn == null) {
+            return;
+        }
+        ViewGroup.LayoutParams lp = leftPreviewControlsColumn.getLayoutParams();
+        if (lp == null) {
+            return;
+        }
+        if (!BuildConfig.DEBUG) {
+            lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            leftPreviewControlsColumn.setLayoutParams(lp);
+            return;
+        }
+        if (panelDebugCalibrationRecorder == null
+                || panelDebugCalibrationRecorder.getVisibility() != View.VISIBLE) {
+            lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            leftPreviewControlsColumn.setLayoutParams(lp);
+            return;
+        }
+        boolean needWideColumn = isMeterCalibrationExpanded || calibrationBarExpanded;
+        if (needWideColumn) {
+            int expandedPx =
+                    getResources().getDimensionPixelSize(R.dimen.left_preview_controls_width_expanded_debug);
+            lp.width = expandedPx;
+        } else {
+            lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        }
+        leftPreviewControlsColumn.setLayoutParams(lp);
+    }
+
     // -------------------------------------------------------------------------
     // 生命周期
     // -------------------------------------------------------------------------
@@ -1069,11 +1307,15 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         if (hasCameraPermission()) {
             startCamera();
         }
+        refreshAmbientLightSensor();
     }
 
     @Override
     protected void onPause() {
         mainHandler.removeCallbacks(applyCameraOptionsRunnable);
+        if (lightSensorManager != null) {
+            lightSensorManager.stopListening();
+        }
         presenter.onPause();
         if (cameraProvider != null) {
             cameraProvider.unbindAll();
@@ -1085,6 +1327,13 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
 
     @Override
     protected void onDestroy() {
+        if (curveSyncReceiver != null) {
+            try {
+                unregisterReceiver(curveSyncReceiver);
+            } catch (IllegalArgumentException ignored) {
+            }
+            curveSyncReceiver = null;
+        }
         mainHandler.removeCallbacks(applyCameraOptionsRunnable);
         if (cameraProvider != null) {
             cameraProvider.unbindAll();
@@ -1097,6 +1346,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         if (captureExecutor instanceof ExecutorService) {
             ((ExecutorService) captureExecutor).shutdown();
         }
+        shareFlowExecutor.shutdown();
         if (presenter != null) {
             presenter.onDestroy();
         }
@@ -1154,6 +1404,27 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     }
 
     @Override
+    public void updateCenterLuminance(double lCdPerM2, double centerMeanDn) {
+        runOnUiThread(() -> {
+            if (!Double.isFinite(lCdPerM2)) {
+                tvCenterLuminance.setText(R.string.center_luminance_placeholder);
+                tvCenterLuminance.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+                return;
+            }
+            tvCenterLuminance.setText(String.format(Locale.US, "L: %.1f cd/m²", lCdPerM2));
+            int colorRes = R.color.text_secondary;
+            if (Double.isFinite(centerMeanDn)) {
+                if (centerMeanDn < 80.0) {
+                    colorRes = R.color.accent_blue;
+                } else if (centerMeanDn > 180.0) {
+                    colorRes = R.color.accent_orange;
+                }
+            }
+            tvCenterLuminance.setTextColor(ContextCompat.getColor(this, colorRes));
+        });
+    }
+
+    @Override
     public void onExposureRecommendationChanged(CameraModel.ExposureRecommendation recommendation) {
         if (recommendation == null) return;
         String text = String.format(
@@ -1184,6 +1455,102 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     @Override
     public void updateCurveSource(String source) {
         runOnUiThread(() -> tvCurveSource.setText("曲线来源: " + source));
+    }
+
+    @Override
+    public void updateCurveSourceBadge(String badgeText) {
+        runOnUiThread(() -> {
+            if (tvCurveSourceBadge != null) {
+                tvCurveSourceBadge.setText(badgeText);
+            }
+        });
+    }
+
+    @Override
+    public void onCalibrationLowQualityComplete(CurveParams fitted) {
+        runOnUiThread(() -> {
+            Toast.makeText(this, R.string.calibration_quality_low_toast, Toast.LENGTH_LONG).show();
+            saveLocalIneligibleCalibrationRecord(fitted, CalibrationUploadData.QUALITY_LOW);
+        });
+    }
+
+    @Override
+    public void onCalibrationAbnormalComplete(CurveParams fitted) {
+        runOnUiThread(() -> {
+            Toast.makeText(this, R.string.calibration_abnormal_params_toast, Toast.LENGTH_LONG).show();
+            saveLocalIneligibleCalibrationRecord(fitted, CalibrationUploadData.QUALITY_ABNORMAL);
+        });
+    }
+
+    private void saveLocalIneligibleCalibrationRecord(CurveParams fitted, String qualityTier) {
+        if (presenter.getCalibrationRepository() == null) {
+            return;
+        }
+        presenter.getCalibrationRepository().saveCalibrationRecord(
+                CalibrationUploadDataFactory.fromCalibration(MainActivity.this, fitted, qualityTier));
+    }
+
+    @Override
+    public void onCalibrationHighMediumComplete(CurveParams fitted, String qualityTier) {
+        shareFlowExecutor.execute(() -> {
+            CalibrationShareRepository.CompletionOutcome outcome =
+                    CalibrationShareRepository.onMediumHighCalibrationCompletedBlocking(
+                            getApplicationContext());
+            runOnUiThread(() -> {
+                if (isFinishing()) {
+                    return;
+                }
+                if (outcome.getShouldShowDialog()) {
+                    showCalibrationShareDialog(fitted, qualityTier);
+                } else {
+                    tryAutoSaveCalibrationShare(fitted, qualityTier);
+                }
+            });
+        });
+    }
+
+    private void tryAutoSaveCalibrationShare(CurveParams fitted, String qualityTier) {
+        shareFlowExecutor.execute(() -> {
+            if (!CalibrationShareRepository.isShareDataEnabledBlocking(MainActivity.this)) {
+                return;
+            }
+            if (!CalibrationShareRepository.isConsentGrantedBlocking(MainActivity.this)) {
+                return;
+            }
+            if (presenter.getCalibrationRepository() == null) {
+                return;
+            }
+            presenter.getCalibrationRepository().saveCalibrationRecord(
+                    CalibrationUploadDataFactory.fromCalibration(MainActivity.this, fitted, qualityTier));
+        });
+    }
+
+    private void showCalibrationShareDialog(CurveParams fitted, String qualityTier) {
+        View root = LayoutInflater.from(this).inflate(R.layout.dialog_calibration_share, null);
+        com.google.android.material.dialog.MaterialAlertDialogBuilder builder =
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(this);
+        builder.setView(root);
+        AlertDialog dialog = builder.create();
+
+        root.findViewById(R.id.btn_share_privacy).setOnClickListener(v ->
+                startActivity(new Intent(this, PrivacyCalibrationShareActivity.class)));
+        root.findViewById(R.id.btn_share_allow).setOnClickListener(v -> {
+            CalibrationShareRepository.applyAllowChoiceBlocking(this);
+            if (presenter.getCalibrationRepository() != null) {
+                presenter.getCalibrationRepository().saveCalibrationRecord(
+                        CalibrationUploadDataFactory.fromCalibration(this, fitted, qualityTier));
+            }
+            dialog.dismiss();
+        });
+        root.findViewById(R.id.btn_share_deny).setOnClickListener(v -> {
+            CalibrationShareRepository.markDeniedAfterPromptBlocking(this);
+            dialog.dismiss();
+        });
+        root.findViewById(R.id.btn_share_never).setOnClickListener(v -> {
+            CalibrationShareRepository.markNeverPromptAgainBlocking(this);
+            dialog.dismiss();
+        });
+        dialog.show();
     }
 
     @Override
@@ -1252,4 +1619,211 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     public int getBrightnessProgress() {
         return seekBarBrightness.getProgress();
     }
+
+    // -------------------------------------------------------------------------
+    // Debug：标定原始数据记录（仅 BuildConfig.DEBUG）
+    // -------------------------------------------------------------------------
+
+    private void setupDebugCalibrationRecorder() {
+        panelDebugCalibrationRecorder = findViewById(R.id.panel_debug_calibration_recorder);
+        if (panelDebugCalibrationRecorder == null) {
+            return;
+        }
+        btnToggleMeterCalibration = findViewById(R.id.btn_toggle_meter_calibration);
+        meterCalibrationExpandContent = findViewById(R.id.meter_calibration_expand_content);
+        if (btnToggleMeterCalibration != null) {
+            btnToggleMeterCalibration.setOnClickListener(v -> {
+                isMeterCalibrationExpanded = !isMeterCalibrationExpanded;
+                persistMeterCalibrationExpanded();
+                updateMeterCalibrationExpandUi();
+            });
+        }
+        updateMeterCalibrationExpandUi();
+
+        Button btnRecord = findViewById(R.id.btn_debug_cal_record);
+        Button btnExport = findViewById(R.id.btn_debug_cal_export);
+        Button btnClear = findViewById(R.id.btn_debug_cal_clear);
+        Button btnCompute = findViewById(R.id.btn_debug_cal_compute);
+        if (btnRecord != null) {
+            btnRecord.setOnClickListener(v -> onDebugRecordCalibrationRow());
+        }
+        if (btnExport != null) {
+            btnExport.setOnClickListener(v -> exportDebugCalibrationCsv());
+        }
+        if (btnClear != null) {
+            btnClear.setOnClickListener(v -> {
+                debugCsvRecorder.clear();
+                showToast("已清除调试 CSV 会话");
+            });
+        }
+        if (btnCompute != null) {
+            btnCompute.setOnClickListener(v -> onDebugComputeCalibrationParams());
+        }
+        btnSensorCalibration = findViewById(R.id.btn_sensor_calibration);
+        if (btnSensorCalibration != null) {
+            btnSensorCalibration.setOnClickListener(v ->
+                    startActivity(new Intent(this, SensorCalibrationActivity.class)));
+        }
+    }
+
+    private void openDebugRecordMeterDialogFromCurrentFrame() {
+        if (!BuildConfig.DEBUG || lightSensorManager == null || presenter == null || debugCsvRecorder == null) {
+            return;
+        }
+        float lux = lightSensorManager.getRawLux();
+        if (!Float.isFinite(lux) && lastAmbientReading != null) {
+            lux = lastAmbientReading.rawLux;
+        }
+        if (!Float.isFinite(lux)) {
+            showToast("暂无传感器 lux，请展开标定条并稍候");
+            return;
+        }
+        double meanY = presenter.getLatestCenterMeanYForDebug();
+        if (!Double.isFinite(meanY)) {
+            showToast("暂无中心 ROI 亮度，请等待预览分析");
+            return;
+        }
+        double bv = CurveParams.bvFromDn(meanY);
+        double appL = LightSensorManager.appDebugLuminanceFromLux(lux);
+        openDebugRecordMeterDialog(lux, bv, appL);
+    }
+
+    private void openDebugRecordMeterDialog(float luxFinal, double bvFinal, double appLFinal) {
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setHint("亮度计读数 cd/m²");
+
+        new AlertDialog.Builder(this)
+                .setTitle("记录校准数据")
+                .setMessage(String.format(Locale.US, "lux=%.2f\nBV=%.4f\nApp L(0.18/π)=%.4f", luxFinal, bvFinal, appLFinal))
+                .setView(input)
+                .setPositiveButton("追加写入", (d, w) -> {
+                    String s = input.getText() != null ? input.getText().toString().trim() : "";
+                    double meter;
+                    try {
+                        meter = Double.parseDouble(s.replace(',', '.'));
+                    } catch (NumberFormatException e) {
+                        showToast("请输入有效数字");
+                        return;
+                    }
+                    if (!Double.isFinite(meter) || meter <= 0.0) {
+                        showToast("亮度计读数须为正数");
+                        return;
+                    }
+                    String ts = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
+                    try {
+                        debugCsvRecorder.appendRow(ts, luxFinal, meter, appLFinal, bvFinal);
+                        showToast("已追加到 CSV");
+                    } catch (IOException e) {
+                        Log.e(TAG, "debug csv append", e);
+                        showToast("写入失败: " + e.getMessage());
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void onDebugRecordCalibrationRow() {
+        openDebugRecordMeterDialogFromCurrentFrame();
+    }
+
+    private void exportDebugCalibrationCsv() {
+        if (!BuildConfig.DEBUG || debugCsvRecorder == null) {
+            return;
+        }
+        java.io.File f = debugCsvRecorder.getCurrentFile();
+        if (f == null || !f.isFile()) {
+            showToast("当前无 CSV 文件，请先记录数据");
+            return;
+        }
+        Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", f);
+        Intent share = new Intent(Intent.ACTION_SEND);
+        share.setType("text/csv");
+        share.putExtra(Intent.EXTRA_STREAM, uri);
+        share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(Intent.createChooser(share, "导出 CSV"));
+    }
+
+    private void onDebugComputeCalibrationParams() {
+        if (!BuildConfig.DEBUG || debugCsvRecorder == null) {
+            return;
+        }
+        List<DebugLuxCalibrationAnalyzer.Row> rows;
+        try {
+            rows = debugCsvRecorder.readRowsForAnalysis();
+        } catch (IOException e) {
+            showToast("读取失败: " + e.getMessage());
+            return;
+        }
+        List<DebugLuxCalibrationAnalyzer.Row> valid = DebugLuxCalibrationAnalyzer.filterValidRows(rows);
+        if (valid.size() < 3) {
+            showToast("数据不足，至少需要3组");
+            return;
+        }
+        final int totalValid = valid.size();
+        DebugLuxCalibrationAnalyzer.OutlierScan scan = DebugLuxCalibrationAnalyzer.scanOutliers(valid);
+        int flagged = scan.getOutlierCount();
+
+        if (flagged > 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle("异常点")
+                    .setMessage(String.format(Locale.getDefault(),
+                            "已根据 2σ 规则标记 %d 个异常点（|比值−均值|＞2×标准差，比值=亮度计/App亮度）。"
+                                    + "是否剔除后再计算校准参数？",
+                            flagged))
+                    .setPositiveButton("剔除后计算", (d, w) -> {
+                        List<DebugLuxCalibrationAnalyzer.Row> kept = scan.rowsWithoutOutliers();
+                        if (kept.size() < 3) {
+                            showToast("剔除后数据不足，至少需要3组");
+                            return;
+                        }
+                        DebugLuxCalibrationAnalyzer.Result r = DebugLuxCalibrationAnalyzer.analyze(
+                                kept, totalValid, flagged, true);
+                        showDebugCalibrationResultDialog(r);
+                    })
+                    .setNegativeButton("使用全部数据", (d, w) -> {
+                        DebugLuxCalibrationAnalyzer.Result r = DebugLuxCalibrationAnalyzer.analyze(
+                                valid, totalValid, flagged, false);
+                        showDebugCalibrationResultDialog(r);
+                    })
+                    .show();
+        } else {
+            DebugLuxCalibrationAnalyzer.Result r = DebugLuxCalibrationAnalyzer.analyze(
+                    valid, totalValid, 0, false);
+            showDebugCalibrationResultDialog(r);
+        }
+    }
+
+    private void showDebugCalibrationResultDialog(DebugLuxCalibrationAnalyzer.Result r) {
+        if (r.effectiveSampleCount < 1) {
+            showToast("无有效拟合数据");
+            return;
+        }
+        SensorCalibrationStore store = new SensorCalibrationStore(this);
+        store.savePendingRecommendation(r);
+        String msg = DebugLuxCalibrationAnalyzer.formatResultForDisplay(r);
+        ScrollView scroll = new ScrollView(this);
+        TextView tv = new TextView(this);
+        tv.setPadding(32, 16, 32, 16);
+        tv.setTextSize(13);
+        tv.setText(msg);
+        scroll.addView(tv);
+
+        new AlertDialog.Builder(this)
+                .setTitle("校准参数（lux×0.18/π）")
+                .setView(scroll)
+                .setPositiveButton("确认并写入传感器校准", (d, w) -> {
+                    store.applyFromDebugAnalyzerResult(r);
+                    if (lightSensorManager != null && lightSensorManager.isListening()) {
+                        lightSensorManager.stopListening();
+                        refreshAmbientLightSensor();
+                    } else {
+                        refreshAmbientLightSensor();
+                    }
+                    showToast("已写入传感器校准，环境光将按新参数换算；可在「传感器校准」中查看");
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
 }

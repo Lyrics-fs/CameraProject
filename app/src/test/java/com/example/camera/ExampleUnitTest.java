@@ -1,5 +1,7 @@
 package com.example.camera;
 
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.util.Range;
 
@@ -10,14 +12,25 @@ import com.example.camera.presenter.CameraPresenter;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 public class ExampleUnitTest {
 
+    private static Context testContext() {
+        Context ctx = mock(Context.class);
+        when(ctx.getApplicationContext()).thenReturn(ctx);
+        when(ctx.getSystemService(Context.SENSOR_SERVICE)).thenReturn(null);
+        SharedPreferences prefs = mock(SharedPreferences.class);
+        when(prefs.contains(anyString())).thenReturn(false);
+        when(ctx.getSharedPreferences(anyString(), eq(Context.MODE_PRIVATE))).thenReturn(prefs);
+        return ctx;
+    }
+
     @Test
     public void isoChange_updatesIsoAndResetsBrightnessSeekBar() {
         FakeView view = new FakeView();
-        CameraPresenter presenter = new CameraPresenter(view, null);
+        CameraPresenter presenter = new CameraPresenter(view, testContext());
         Range<Integer> isoRange = mockRange();
         Range<Long> exposureRange = mockRange();
         when(isoRange.getLower()).thenReturn(100);
@@ -38,7 +51,7 @@ public class ExampleUnitTest {
     @Test
     public void exposureChange_updatesExposureAndFormatsDisplay() {
         FakeView view = new FakeView();
-        CameraPresenter presenter = new CameraPresenter(view, null);
+        CameraPresenter presenter = new CameraPresenter(view, testContext());
         Range<Integer> isoRange = mockRange();
         Range<Long> exposureRange = mockRange();
         when(isoRange.getLower()).thenReturn(100);
@@ -58,7 +71,7 @@ public class ExampleUnitTest {
     @Test
     public void brightnessChange_updatesGainAndClearsManualLabels() {
         FakeView view = new FakeView();
-        CameraPresenter presenter = new CameraPresenter(view, null);
+        CameraPresenter presenter = new CameraPresenter(view, testContext());
         Range<Integer> isoRange = mockRange();
         Range<Long> exposureRange = mockRange();
         when(isoRange.getLower()).thenReturn(100);
@@ -105,6 +118,7 @@ public class ExampleUnitTest {
         @Override public void updateExposureDisplay(String exposureText) { lastExposureText = exposureText; }
         @Override public void updateBrightnessMode(String mode) { lastBrightnessMode = mode; }
         @Override public void updateExposureValue(String exposureValue) { lastExposureValue = exposureValue; }
+        @Override public void updateCenterLuminance(double lCdPerM2, double centerMeanDn) {}
         @Override public void onExposureRecommendationChanged(CameraModel.ExposureRecommendation recommendation) {}
         @Override public void requestAutoApplyRecommendation() {}
         @Override public void updateCalibrationStatus(String text) {}

@@ -1,6 +1,150 @@
 <resources>
     <string name="app_name">CameraProject</string>
+    <string name="center_luminance_placeholder">L: -- cd/m²</string>
+
+    <!-- 标定：环境光与灰卡引导 -->
+    <string name="calibration_gray_card_title">灰卡引导</string>
+    <string name="calibration_gray_card_hint">请将 18% 标准中性灰卡置于预览画面中央，约占画面 1/4～1/3，卡面与镜头尽量平行，避免高光反光正对相机。</string>
+    <string name="calibration_gray_card_tips">· 光线：均匀漫射照明，避免阳光直射与强烈阴影\n· 曝光：可手动微调 ISO/快门，使灰卡区域亮度适中（勿过曝或死黑）\n· 流程：至少 8 次有效采样；每次改变曝光后稍等稳定再点「采样」\n· 传感器：留意上方照度读数，稳定后再采样；勿遮挡机身环境光传感器</string>
+    <string name="calibration_no_light_sensor">当前设备无环境光传感器，无法进行真实亮度标定</string>
+    <string name="calibration_ambient_placeholder">当前照度: -- lux (≈ -- cd/m²)</string>
+    <string name="calibration_ambient_format">当前照度: %1$.1f lux (≈ %2$.2f cd/m²)</string>
+    <string name="calibration_lux_too_low">光线过暗，建议增加照明</string>
+    <string name="calibration_lux_too_high">光线过强，建议移至阴凉处</string>
+    <string name="calibration_capture_no_ambient">无法获取环境光照度，请检查光线传感器或移动手机位置</string>
+    <string name="calibration_ambient_unstable">环境光照度变化较快，请保持稳定后重试采样</string>
+    <string name="calibration_sensor_indicator_content_desc">环境光传感器状态</string>
+    <string name="calibration_fit_quality_low">拟合质量较低，建议重新标定</string>
+    <string name="share_cal_quality_low">标定质量较低，建议重新标定</string>
+    <string name="calibration_quality_low_toast">标定质量较低，建议增加采样点后重新标定</string>
+    <string name="calibration_abnormal_params_toast">标定参数异常，请重新标定或检查采样条件</string>
+    <string name="curve_badge_placeholder">曲线: …</string>
+    <string name="curve_sync_no_cloud_use_prior">当前机型暂无云端标准曲线，已使用先验公式；建议完成一次标定以获得更准确亮度。</string>
+    <string name="settings_restore_curve_title">恢复默认曲线</string>
+    <string name="settings_restore_curve_summary">回退到上一条曲线快照；若无快照则恢复为先验公式（用于云端曲线明显不准时）。</string>
+    <string name="settings_restore_curve_done">已恢复曲线</string>
+
+    <string name="share_dialog_title">分享标定数据？</string>
+    <string name="share_dialog_message">您完成的标定结果可以帮助改进同型号设备的亮度测量精度。\n\n分享内容：\n✓ 设备型号\n✓ 曲线参数 a、b\n✓ 标定质量（R²）\n✗ 不包含任何个人隐私</string>
+    <string name="share_dialog_privacy">查看隐私声明</string>
+    <string name="share_dialog_allow">允许</string>
+    <string name="share_dialog_deny">拒绝</string>
+    <string name="share_dialog_never_ask">不再询问</string>
+
+    <string name="settings_title">设置</string>
+    <string name="settings_share_data_title">数据分享</string>
+    <string name="settings_share_data_summary">开启后，在您同意的前提下可将匿名标定摘要用于改进同机型曲线（不含个人隐私）。</string>
+    <string name="settings_reset_auth">重置授权</string>
+    <string name="settings_reset_auth_hint">清除「不再询问」与授权状态，下次高质量标定后可再次弹出询问。</string>
+    <string name="settings_reset_auth_done">已重置分享授权状态</string>
+    <string name="settings_pending_uploads_zero">有 0 条数据待上传</string>
+    <string name="settings_pending_uploads_count">有 %1$d 条数据待上传</string>
+    <string name="settings_wifi_only_auto_title">仅 Wi‑Fi 下自动上传</string>
+    <string name="settings_wifi_only_auto_summary">开启后，自动同步仅在非计费网络（通常为 Wi‑Fi）下进行；关闭后可在移动网络下自动上传。「立即上传」始终可在任意已连接网络下尝试。</string>
+    <string name="settings_upload_now">立即上传</string>
+    <string name="settings_upload_status_idle">上传：空闲</string>
+    <string name="settings_upload_status_enqueued">上传：已排队，等待网络…</string>
+    <string name="settings_upload_status_running">上传：进行中…</string>
+    <string name="settings_upload_status_running_detail">上传：进行中（待处理 %1$d 条，本批 %2$d 条，已上传 %3$d 条）</string>
+    <string name="settings_upload_status_success">上传：已完成</string>
+    <string name="settings_upload_status_failed">上传：失败（%1$s）</string>
+    <string name="settings_upload_status_blocked">上传：等待网络或系统调度</string>
+    <string name="settings_upload_need_share">请先开启「数据分享」后再上传</string>
+    <string name="settings_upload_enqueued_toast">已加入上传队列</string>
+    <string name="settings_upload_unknown_error">未知错误</string>
+
+    <string name="privacy_share_title">标定数据分享说明</string>
+    <string name="privacy_share_body" formatted="false">【用途】\n您选择分享的标定摘要（设备型号、曲线参数 a 与 b、拟合优度 R²、样本数量、应用与系统版本等非标识信息）仅用于改进同型号设备的默认亮度响应模型或统计分析，不用于广告定向或个人画像。\n\n【存储与传输】\n数据先保存在本机数据库中，在联网且您已授权时可能上传至应用提供方服务器；传输过程建议使用加密通道（由正式服务端配置决定）。服务器侧应遵循最小必要原则存储与聚合。\n\n【不包含的个人信息】\n不包含姓名、手机号、邮箱、精确地理位置、通讯录、照片内容、账号标识符、IMEI/Android ID 等可识别特定个人的信息。\n\n【您的控制】\n您可在「设置」中关闭「数据分享」或「重置授权」；关闭后新的标定结果不会作为分享数据保存上传（已上传数据由服务端策略管理）。\n\n【说明】\n本说明为应用内摘要，不构成法律文件；正式版本以隐私政策全文为准。</string>
+    <string name="calibration_light_sensor_no_feature">系统未声明环境光传感器，无法进行真实亮度标定</string>
+    <string name="calibration_light_sensor_no_hardware">未检测到可用的环境光传感器（可能被厂商裁剪或当前为模拟器），无法进行真实亮度标定</string>
+    <string name="meter_calibration_panel_title">亮度计校准（仅 Debug）</string>
+    <string name="meter_calibration_toggle_expand">亮度计校准 ▾</string>
+    <string name="meter_calibration_toggle_collapse">亮度计校准 ▴</string>
+
     <string name="user_help_title">使用说明</string>
     <string name="user_help_chip">使用说明</string>
-    <string name="user_help_body">【切换模式】目的是在「跟随测光建议」与「完全手控曝光」之间二选一：推荐模式便于快速拍准；手动模式便于固定参数或刻意欠/过曝。\n\n【应用推荐值】目的是把当前算出的 ISO/曝光立刻套到相机，省掉反复对齐的时间。\n\n【锁定当前推荐值】目的是在构图不变时冻结曝光读数，避免轻微晃动导致推荐值跳动。\n\n【高级参数】目的是调节自动微调有多积极：稳定帧越多越稳但反应慢；步进与 BV 阈值决定每次改多少、多容易触发调整。\n\n【标定】目的是让「亮度—BV」换算贴合你的手机传感器，使伪彩图与 E 值更可信；需灰卡/色卡上多点采样后再拟合。入口在预览左下角、位于「高级参数」下方，点「标定」展开后开始标定、采样、完成拟合。\n\n【拍照】目的是同时保存原图与伪彩分析结果，便于对比真实亮度与可视化分布。\n\n【重试 / 就绪提示】目的是在相机未绑定或出错时给你恢复预览的入口；就绪前请勿依赖画面构图。</string>
+    <string name="user_help_body" formatted="false">【切换模式】在「跟随测光建议」与「完全手控曝光」之间切换：推荐模式便于快速拍准；手动模式便于固定参数或刻意欠/过曝。\n\n【应用推荐值】将当前算出的 ISO/曝光立刻套到相机。\n\n【锁定当前推荐值】构图不变时冻结曝光读数，避免轻微晃动导致推荐值跳动。\n\n【高级参数】调节自动微调的积极程度：稳定帧越多越稳但反应慢；步进与 BV 阈值决定每次改多少、多容易触发调整。\n\n【曲线来源】参数区「曲线来源」表示当前用于换算亮度的模型：默认可为先验公式 L=a×exp(b×BV)；完成本机标定后优先使用「已标定」参数；联网且服务端有同机型标准曲线时，可能在未标定或当前仍为先验/旧云端曲线时应用「云端标准曲线」（不会覆盖已有的本机标定）。若云端曲线明显不准，可在「设置」中「恢复默认曲线」回退到上一条快照或先验。\n\n【首次使用·建议顺序】严肃测量建议先做环境光 lux 校准（可选、建议在实验室；调试包可用亮度计流程），再做成像 BV→L 标定。参考亮度 L 由 lux 经 App 公式换算：L = lux_校准后 × 0.18 / π；未做 lux 校准时「校准后」即原始读数。未校准时也可直接标定，但与亮度计对齐误差通常更大。\n\n【环境光传感器校准（lux，可选）】建议在实验室完成。入口（仅 Debug 构建）：预览左下「亮度计校准」面板最下方「传感器校准」。可选关闭 / 线性（scale、offset）/ 分段线性；「应用推荐参数」需先在亮度计流程中算出推荐；「保存并应用」后，照度与标定流程使用的 lux 均为校准后数值。\n\n【亮度计校准与验证（仅 Debug）】在「亮度计校准」面板可向 CSV 追加原始 lux、亮度计、App 亮度等；有效数据不少于 3 组后可「计算校准参数」（含 2σ 异常点提示），结果可写入传感器校准或在传感器校准页「应用推荐参数」后再保存。训练与验证须分开：在传感器校准页「验证校准效果」于新场景采集 5～10 组，查看报告并可导出 CSV。\n\n【响应曲线标定（BV→L）】入口：预览左下「标定 ▾」→「开始标定」→ 多次「采样」→「完成拟合」。参考 L 来自环境光链路；lux 校准越可靠，参考 L 越接近物理亮度。\n\n【标定·准备】18% 中性灰卡；均匀漫射光、避免直射机身环境光传感器与卡面强反光；手机尽量固定；每次改变光照后等待约 2～3 秒，lux 稳定后再采样。亦可用另一台设备全屏显示灰卡图作权宜（须固定对方屏幕亮度）。\n\n【标定·多组采样】至少 8 组且覆盖暗、中、亮多级，BV 与照度跨度越大通常越可靠。经验参考（以本机照度与画面为准）：暗部约 5～20 lux（BV 约 -3～0）、中灰约 50～200 lux（BV 约 1～4）、高光约 500～2000 lux（BV 约 5～9）。每组：调好光 → 灰卡置于画面中央约占 1/4～1/3、尽量与镜头平行 → 稳定后点「采样」→ 改变光照或曝光后重复。\n\n【实验室数据采集规范】灰卡充满画面中心约 1/3；三脚架固定；每次采样前等待约 2 秒让传感器与曝光稳定；避免光源直射环境光传感器；建议按亮度级别采集约 12～15 组（极暗至极亮）。\n\n【拍照】同时保存原图与伪彩分析图，便于对比真实亮度与可视化分布。\n\n【左上角角标】第一行为 E 值；其下为实时中心亮度 L（cd/m²，由当前活动曲线与画面中心 ROI 估算）；再下为「状态: …」。需恢复相机时，「状态」同行右侧可出现「重试」。未就绪时可见全屏「相机启动中…」。\n\n【导出伪彩图】左侧文字与界面统计一致：平均 RGB、灰度与中心 DN、EXIF BV、标定曲线公式（L 与 BV）、R²、来源（本机标定日期 / 先验 / 云端说明）、中心亮度 L。\n\n【设置与其他】可开启「数据分享」、仅 Wi-Fi 自动上传、手动「立即上传」、恢复默认曲线、重置分享授权；上传仅为匿名标定摘要（详见应用内隐私说明）。仅 Debug 包在设置中提供「后台数据统计」（图表、CSV/JSON 导出、2σ 标记等，供演示），Release 无此入口。</string>
+
+    <!-- 传感器校准（lux） -->
+    <string name="sensor_calibration_entry">传感器校准</string>
+    <string name="sensor_calibration_title">传感器校准</string>
+    <string name="sensor_cal_status_using_default">使用默认（未应用 lux 校准）</string>
+    <string name="sensor_cal_status_calibrated">已校准</string>
+    <string name="sensor_cal_status_not_calibrated">未校准</string>
+    <string name="sensor_cal_hint_uncalibrated">使用原始传感器数据，建议在实验室完成校准。</string>
+    <string name="sensor_cal_hint_calibrated_linear">已校准：线性模式，scale=%1$.4f，offset=%2$.4f，更新于 %3$s</string>
+    <string name="sensor_cal_hint_calibrated_piecewise">已校准：分段模式，共 %1$d 段，更新于 %2$s</string>
+    <string name="sensor_cal_mode_off">关闭</string>
+    <string name="sensor_cal_mode_linear">线性</string>
+    <string name="sensor_cal_mode_piecewise">分段线性</string>
+    <string name="sensor_cal_label_scale">scale</string>
+    <string name="sensor_cal_label_offset">offset</string>
+    <string name="sensor_cal_segments_title">分段 [lux 下限, 上限, scale]</string>
+    <string name="sensor_cal_add_segment">添加一段</string>
+    <string name="sensor_cal_remove_segment">删除</string>
+    <string name="sensor_cal_restore_default">恢复默认</string>
+    <string name="sensor_cal_apply_recommended">应用推荐参数</string>
+    <string name="sensor_cal_save_apply">保存并应用</string>
+    <string name="sensor_cal_toast_saved">已保存校准参数</string>
+    <string name="sensor_cal_toast_cleared">已恢复默认</string>
+    <string name="sensor_cal_toast_no_pending">暂无第一步计算出的推荐参数，请先在调试流程中「计算校准参数」</string>
+    <string name="sensor_cal_toast_applied_pending">已填入推荐参数，请检查后点「保存并应用」</string>
+    <string name="sensor_cal_error_parse_number">请输入有效数字</string>
+    <string name="sensor_cal_error_piecewise_need_segment">分段模式至少需要一段</string>
+    <string name="sensor_cal_error_piecewise_order">每段需满足 lux 下限 ≤ 上限</string>
+    <string name="sensor_cal_segment_infinity_hint">上限可填极大值表示无上限</string>
+
+    <!-- Debug：校准效果验证 -->
+    <string name="cal_verify_entry">验证校准效果</string>
+    <string name="cal_verify_title">校准效果验证</string>
+    <string name="cal_verify_prep">请准备：\n· 固定 18% 灰卡、手机姿态与亮度计位置，与训练阶段无关的新光照条件（勿复用原训练组）。\n· 共采集 5～10 组：每组改变光照或距离后等待 lux 稳定，再记录。\n· 每组需输入亮度计读数（cd/m²）。</string>
+    <string name="cal_verify_start">开始验证</string>
+    <string name="cal_verify_record_sample">记录本组（输入亮度计）</string>
+    <string name="cal_verify_finish">完成验证并生成报告</string>
+    <string name="cal_verify_export_csv">导出 CSV</string>
+    <string name="cal_verify_reset">重新验证</string>
+    <string name="cal_verify_report_title">统计报告</string>
+    <string name="cal_verify_lux_line">当前传感器原始 lux：%1$s</string>
+    <string name="cal_verify_count_line">已采集 %1$d / %2$d 组（完成需至少 %3$d 组，至多 %4$d 组）</string>
+    <string name="cal_verify_no_sensor">当前设备无环境光传感器</string>
+    <string name="cal_verify_need_lux">请先展开标定并开始验证，等待有效 lux 再记录</string>
+    <string name="cal_verify_meter_hint">亮度计 cd/m²</string>
+    <string name="cal_verify_meter_invalid">亮度计读数须为正数</string>
+    <string name="cal_verify_need_more_samples">请至少采集 %1$d 组再完成</string>
+    <string name="cal_verify_export_fail">导出失败：%1$s</string>
+    <string name="cal_verify_verdict_good" formatted="false">结论：校准效果良好（校准后 MAPE 低于 15%）</string>
+    <string name="cal_verify_verdict_retrain" formatted="false">结论：建议重新采集训练数据（校准后 MAPE 高于 30%）</string>
+    <string name="cal_verify_verdict_mid" formatted="false">结论：校准效果尚可（校准后 MAPE 在 15%～30% 之间）</string>
+
+    <!-- Debug：后台数据统计（答辩演示，不进入正式版 UI） -->
+    <string name="debug_stats_title">后台数据统计</string>
+    <string name="debug_stats_entry">后台数据统计</string>
+    <string name="debug_stats_summary_cards">统计卡片</string>
+    <string name="debug_stats_model_table_title">各机型标定数据（HIGH/MEDIUM，未手动排除）</string>
+    <string name="debug_stats_chart_models_bar">各型号数据量（柱状图）</string>
+    <string name="debug_stats_chart_models_pie">各型号数据量（饼图）</string>
+    <string name="debug_stats_chart_r2_hist">标定质量 R² 分布（直方图）</string>
+    <string name="debug_stats_chart_upload_trend">近 30 天本地上传/记录时间分布（折线图）</string>
+    <string name="debug_stats_recent_records">最近 20 条记录</string>
+    <string name="debug_stats_btn_auto_flag">运行 2σ 自动标记</string>
+    <string name="debug_stats_btn_agg_preview">预览聚合曲线</string>
+    <string name="debug_stats_btn_export_csv">导出统计 CSV</string>
+    <string name="debug_stats_btn_export_json">导出完整 JSON</string>
+    <string name="debug_stats_card_uploaded">已上传\n%1$d 条</string>
+    <string name="debug_stats_card_pending">待上传\n%1$d 条</string>
+    <string name="debug_stats_card_models">机型种类\n%1$d 种</string>
+    <string name="debug_stats_curve_prior">当前曲线：先验公式\na=%1$.4f，b=%2$.4f\nR²=%3$.4f，拟合样本=%4$d\n更新时间：%5$s</string>
+    <string name="debug_stats_curve_calibrated">当前曲线：本机标定\na=%1$.4f，b=%2$.4f\nR²=%3$.4f，拟合样本=%4$d\n更新时间：%5$s</string>
+    <string name="debug_stats_curve_cloud">当前曲线：云端标准曲线\na=%1$.4f，b=%2$.4f\nProfile 版本=%3$d，聚合参考条数=%4$d，置信度=%5$.3f\n更新时间：%6$s</string>
+    <string name="debug_stats_time_none">—</string>
+    <string name="debug_stats_export_shared">已生成文件，请选择分享目标</string>
+    <string name="debug_stats_auto_done">已按机型重新计算 2σ 异常标记</string>
+    <string name="debug_stats_preview_title">标准曲线聚合预览（本地 2σ 后均值）</string>
+    <string name="debug_stats_detail_title">记录详情</string>
+    <string name="debug_stats_invalid_switch">标记为无效数据</string>
+    <string name="debug_stats_invalid_reason_hint">无效原因（将随记录保存）</string>
+    <string name="debug_stats_dialog_save">保存</string>
+    <string name="debug_stats_dialog_close">关闭</string>
+    <string name="debug_stats_flag_auto">自动：%1$s</string>
+    <string name="debug_stats_flag_manual">手动无效：%1$s</string>
 </resources>

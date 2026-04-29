@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 预览约 2/3：左上 E/状态+使用说明；左下模式+高级参数+标定（标定在高级参数下）；下 1/3 参数区 -->
+<!-- 预览约 2/3：左上 E/状态+使用说明；左下 模式→高级参数→亮度计校准(Debug)→标定；下 1/3 参数区 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -52,6 +52,30 @@
                     android:textSize="10sp"
                     android:textStyle="bold" />
 
+                <TextView
+                    android:id="@+id/tvCenterLuminance"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="monospace"
+                    android:includeFontPadding="false"
+                    android:lines="1"
+                    android:text="@string/center_luminance_placeholder"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/tv_preview_ambient_lux"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFamily="monospace"
+                    android:includeFontPadding="false"
+                    android:lines="1"
+                    android:text="@string/calibration_ambient_placeholder"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="10sp" />
+
                 <LinearLayout
                     android:id="@+id/status_container"
                     android:layout_width="wrap_content"
@@ -87,6 +111,19 @@
                         android:textSize="9sp"
                         android:visibility="gone" />
                 </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_curve_source_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:maxWidth="220dp"
+                    android:maxLines="2"
+                    android:text="@string/curve_badge_placeholder"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="9sp" />
             </LinearLayout>
 
             <TextView
@@ -106,17 +143,36 @@
                 android:text="@string/user_help_chip"
                 android:textColor="@color/white"
                 android:textSize="9sp" />
+
+            <TextView
+                android:id="@+id/btn_settings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/bg_user_help_card"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackgroundBorderless"
+                android:includeFontPadding="false"
+                android:paddingStart="8dp"
+                android:paddingTop="5dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="5dp"
+                android:text="@string/settings_title"
+                android:textColor="@color/white"
+                android:textSize="9sp" />
         </LinearLayout>
 
         <!-- 左下：模式切换 + 高级参数（展开后为 2×2），同一列对齐，半透明底 -->
         <LinearLayout
+            android:id="@+id/left_preview_controls_column"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|start"
             android:layout_marginStart="4dp"
             android:layout_marginBottom="4dp"
             android:elevation="2dp"
-            android:maxWidth="260dp"
+            android:maxWidth="@dimen/left_preview_controls_max_width"
             android:orientation="vertical">
 
             <Button
@@ -281,6 +337,201 @@
                     app:backgroundTint="@null" />
             </GridLayout>
 
+            <LinearLayout
+                android:id="@+id/panel_debug_calibration_recorder"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:background="@drawable/bg_preview_hud"
+                android:orientation="vertical"
+                android:paddingStart="2dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="2dp"
+                android:paddingBottom="2dp"
+                android:visibility="gone">
+
+                <Button
+                    android:id="@+id/btn_toggle_meter_calibration"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_preview_hud"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:minHeight="28dp"
+                    android:paddingStart="2dp"
+                    android:paddingTop="2dp"
+                    android:paddingEnd="2dp"
+                    android:paddingBottom="2dp"
+                    android:stateListAnimator="@null"
+                    android:text="@string/meter_calibration_toggle_expand"
+                    android:textAllCaps="false"
+                    android:textColor="@color/accent_orange"
+                    android:textSize="10sp"
+                    app:backgroundTint="@null" />
+
+                <LinearLayout
+                    android:id="@+id/meter_calibration_expand_content"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:orientation="vertical"
+                    android:paddingBottom="0dp"
+                    android:visibility="gone">
+
+                    <GridLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:alignmentMode="alignMargins"
+                        android:columnCount="2"
+                        android:columnOrderPreserved="false"
+                        android:rowCount="2"
+                        android:useDefaultMargins="false">
+
+                        <Button
+                            android:id="@+id/btn_debug_cal_record"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_row="0"
+                            android:layout_column="0"
+                            android:layout_columnWeight="1"
+                            android:layout_gravity="fill_horizontal"
+                            android:layout_marginEnd="2dp"
+                            android:layout_marginBottom="2dp"
+                            android:background="@drawable/bg_preview_hud"
+                            android:gravity="center"
+                            android:includeFontPadding="false"
+                            android:insetLeft="0dp"
+                            android:insetTop="0dp"
+                            android:insetRight="0dp"
+                            android:insetBottom="0dp"
+                            android:maxLines="1"
+                            android:minWidth="0dp"
+                            android:paddingStart="2dp"
+                            android:paddingTop="0dp"
+                            android:paddingEnd="2dp"
+                            android:paddingBottom="0dp"
+                            android:stateListAnimator="@null"
+                            android:text="记录校准数据"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="8sp"
+                            app:backgroundTint="@null" />
+
+                        <Button
+                            android:id="@+id/btn_debug_cal_export"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_row="0"
+                            android:layout_column="1"
+                            android:layout_columnWeight="1"
+                            android:layout_gravity="fill_horizontal"
+                            android:layout_marginBottom="2dp"
+                            android:background="@drawable/bg_preview_hud"
+                            android:gravity="center"
+                            android:includeFontPadding="false"
+                            android:insetLeft="0dp"
+                            android:insetTop="0dp"
+                            android:insetRight="0dp"
+                            android:insetBottom="0dp"
+                            android:maxLines="1"
+                            android:minWidth="0dp"
+                            android:paddingStart="2dp"
+                            android:paddingTop="0dp"
+                            android:paddingEnd="2dp"
+                            android:paddingBottom="0dp"
+                            android:stateListAnimator="@null"
+                            android:text="导出CSV"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="8sp"
+                            app:backgroundTint="@null" />
+
+                        <Button
+                            android:id="@+id/btn_debug_cal_clear"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_row="1"
+                            android:layout_column="0"
+                            android:layout_columnWeight="1"
+                            android:layout_gravity="fill_horizontal"
+                            android:layout_marginEnd="2dp"
+                            android:background="@drawable/bg_preview_hud"
+                            android:gravity="center"
+                            android:includeFontPadding="false"
+                            android:insetLeft="0dp"
+                            android:insetTop="0dp"
+                            android:insetRight="0dp"
+                            android:insetBottom="0dp"
+                            android:maxLines="1"
+                            android:minWidth="0dp"
+                            android:paddingStart="2dp"
+                            android:paddingTop="0dp"
+                            android:paddingEnd="2dp"
+                            android:paddingBottom="0dp"
+                            android:stateListAnimator="@null"
+                            android:text="清除数据"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="8sp"
+                            app:backgroundTint="@null" />
+
+                        <Button
+                            android:id="@+id/btn_debug_cal_compute"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_row="1"
+                            android:layout_column="1"
+                            android:layout_columnWeight="1"
+                            android:layout_gravity="fill_horizontal"
+                            android:background="@drawable/bg_preview_hud"
+                            android:gravity="center"
+                            android:includeFontPadding="false"
+                            android:insetLeft="0dp"
+                            android:insetTop="0dp"
+                            android:insetRight="0dp"
+                            android:insetBottom="0dp"
+                            android:maxLines="1"
+                            android:minWidth="0dp"
+                            android:paddingStart="2dp"
+                            android:paddingTop="0dp"
+                            android:paddingEnd="2dp"
+                            android:paddingBottom="0dp"
+                            android:stateListAnimator="@null"
+                            android:text="计算校准参数"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="8sp"
+                            app:backgroundTint="@null" />
+                    </GridLayout>
+
+                    <Button
+                        android:id="@+id/btn_sensor_calibration"
+                        android:layout_width="match_parent"
+                        android:layout_height="36dp"
+                        android:layout_marginTop="2dp"
+                        android:background="@drawable/bg_preview_hud"
+                        android:gravity="center"
+                        android:includeFontPadding="false"
+                        android:insetLeft="0dp"
+                        android:insetTop="0dp"
+                        android:insetRight="0dp"
+                        android:insetBottom="0dp"
+                        android:maxLines="1"
+                        android:minWidth="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingTop="0dp"
+                        android:paddingEnd="4dp"
+                        android:paddingBottom="0dp"
+                        android:stateListAnimator="@null"
+                        android:text="@string/sensor_calibration_entry"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="8sp"
+                        app:backgroundTint="@null" />
+                </LinearLayout>
+            </LinearLayout>
+
             <Button
                 android:id="@+id/btn_toggle_calibration_bar"
                 android:layout_width="match_parent"
@@ -301,6 +552,85 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="10sp"
                 app:backgroundTint="@null" />
+
+            <LinearLayout
+                android:id="@+id/calibration_sensor_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:background="@drawable/bg_preview_hud"
+                android:orientation="vertical"
+                android:paddingStart="6dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="6dp"
+                android:paddingBottom="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <View
+                        android:id="@+id/calibration_sensor_indicator"
+                        android:layout_width="8dp"
+                        android:layout_height="8dp"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/bg_calibration_sensor_dot"
+                        android:contentDescription="@string/calibration_sensor_indicator_content_desc" />
+
+                    <TextView
+                        android:id="@+id/tv_calibration_ambient"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:includeFontPadding="false"
+                        android:text="@string/calibration_ambient_placeholder"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="9sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="6dp"
+                    android:layout_marginBottom="2dp"
+                    android:background="@color/bg_card_stroke" />
+
+                <TextView
+                    android:id="@+id/tv_calibration_gray_card_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:text="@string/calibration_gray_card_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_calibration_gray_card_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:includeFontPadding="false"
+                    android:lineSpacingMultiplier="1.12"
+                    android:text="@string/calibration_gray_card_hint"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="9sp" />
+
+                <TextView
+                    android:id="@+id/tv_calibration_gray_card_tips"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:includeFontPadding="false"
+                    android:lineSpacingExtra="2dp"
+                    android:lineSpacingMultiplier="1.05"
+                    android:text="@string/calibration_gray_card_tips"
+                    android:textColor="@color/text_label"
+                    android:textSize="8sp" />
+            </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/calibration_actions_row"
