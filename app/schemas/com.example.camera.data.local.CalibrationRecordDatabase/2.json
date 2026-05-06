@@ -1,0 +1,170 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "e106729b515f66e262bdb2c0985aac21",
+    "entities": [
+      {
+        "tableName": "calibration_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uploadId` TEXT NOT NULL, `deviceModel` TEXT NOT NULL, `manufacturer` TEXT NOT NULL, `androidVersion` TEXT NOT NULL, `appVersion` TEXT NOT NULL, `paramA` REAL NOT NULL, `paramB` REAL NOT NULL, `sampleCount` INTEGER NOT NULL, `rSquared` REAL NOT NULL, `calibrationTime` INTEGER NOT NULL, `uploadTime` INTEGER NOT NULL, `quality` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `markedUploadedAt` INTEGER NOT NULL, `lastFailedAt` INTEGER NOT NULL, `debugExcluded` INTEGER NOT NULL DEFAULT 0, `debugExclusionReason` TEXT DEFAULT NULL, `debugAutoAnomaly` INTEGER NOT NULL DEFAULT 0, `debugAutoAnomalyReason` TEXT DEFAULT NULL, PRIMARY KEY(`uploadId`))",
+        "fields": [
+          {
+            "fieldPath": "uploadId",
+            "columnName": "uploadId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceModel",
+            "columnName": "deviceModel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manufacturer",
+            "columnName": "manufacturer",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "androidVersion",
+            "columnName": "androidVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appVersion",
+            "columnName": "appVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paramA",
+            "columnName": "paramA",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paramB",
+            "columnName": "paramB",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sampleCount",
+            "columnName": "sampleCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rSquared",
+            "columnName": "rSquared",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calibrationTime",
+            "columnName": "calibrationTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadTime",
+            "columnName": "uploadTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quality",
+            "columnName": "quality",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncStatus",
+            "columnName": "syncStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "markedUploadedAt",
+            "columnName": "markedUploadedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastFailedAt",
+            "columnName": "lastFailedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "debugExcluded",
+            "columnName": "debugExcluded",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "debugExclusionReason",
+            "columnName": "debugExclusionReason",
+            "affinity": "TEXT",
+            "defaultValue": "NULL"
+          },
+          {
+            "fieldPath": "debugAutoAnomaly",
+            "columnName": "debugAutoAnomaly",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "debugAutoAnomalyReason",
+            "columnName": "debugAutoAnomalyReason",
+            "affinity": "TEXT",
+            "defaultValue": "NULL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "uploadId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_calibration_records_deviceModel",
+            "unique": false,
+            "columnNames": [
+              "deviceModel"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_calibration_records_deviceModel` ON `${TABLE_NAME}` (`deviceModel`)"
+          },
+          {
+            "name": "index_calibration_records_quality",
+            "unique": false,
+            "columnNames": [
+              "quality"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_calibration_records_quality` ON `${TABLE_NAME}` (`quality`)"
+          },
+          {
+            "name": "index_calibration_records_uploadTime",
+            "unique": false,
+            "columnNames": [
+              "uploadTime"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_calibration_records_uploadTime` ON `${TABLE_NAME}` (`uploadTime`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e106729b515f66e262bdb2c0985aac21')"
+    ]
+  }
+}

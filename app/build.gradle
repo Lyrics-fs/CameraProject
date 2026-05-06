@@ -1,0 +1,88 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
+    id 'org.jetbrains.kotlin.kapt'
+}
+
+android {
+    namespace 'com.example.camera'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.example.camera"
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+
+        // 标定数据上传 API 根地址（末尾保留 /）；若已改用 Supabase 可忽略
+        buildConfigField "String", "CALIBRATION_API_BASE_URL", "\"https://api.example.com/\""
+        // Supabase：在控制台复制 Project URL 与 anon public key
+        buildConfigField "String", "SUPABASE_URL", "\"https://YOUR_PROJECT_REF.supabase.co\""
+        buildConfigField "String", "SUPABASE_ANON_KEY", "\"YOUR_SUPABASE_ANON_KEY\""
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    kotlinOptions {
+        jvmTarget = "11"
+    }
+    buildFeatures {
+        buildConfig true
+        viewBinding true
+    }
+}
+
+kapt {
+    correctErrorTypes true
+    arguments {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    implementation platform(libs.supabase.bom)
+    implementation libs.supabase.postgrest
+    implementation libs.supabase.auth
+    implementation libs.ktor.client.android
+    implementation libs.kotlinx.serialization.json
+    implementation libs.exifinterface
+    implementation libs.camera.core
+    implementation libs.camera.camera2
+    implementation libs.camera.lifecycle
+    implementation libs.camera.view
+    implementation libs.appcompat
+    implementation libs.material
+    implementation libs.activity
+    implementation libs.lifecycle.livedata
+    implementation libs.lifecycle.runtime.ktx
+    implementation libs.datastore.preferences
+    implementation libs.kotlinx.coroutines.android
+    implementation libs.retrofit
+    implementation libs.retrofit.converter.gson
+    implementation libs.okhttp.logging
+    implementation libs.work.runtime.ktx
+    implementation libs.room.runtime
+    implementation libs.room.ktx
+    kapt libs.room.compiler
+    implementation libs.constraintlayout
+    implementation 'org.apache.commons:commons-math3:3.6.1'
+    testImplementation libs.junit
+    testImplementation libs.mockito.core
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
+    debugImplementation libs.mpandroidchart
+}

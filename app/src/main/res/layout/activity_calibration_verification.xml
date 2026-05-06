@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tv_verify_prep"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:lineSpacingMultiplier="1.12"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/tv_verify_lux"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/tv_verify_count"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btn_verify_start"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/cal_verify_start"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/btn_verify_record"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:enabled="false"
+            android:text="@string/cal_verify_record_sample"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/btn_verify_finish"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:enabled="false"
+            android:text="@string/cal_verify_finish"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/btn_verify_export"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:enabled="false"
+            android:text="@string/cal_verify_export_csv"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/btn_verify_reset"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/cal_verify_reset"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/cal_verify_report_title"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_verify_report"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fontFamily="monospace"
+            android:textSize="11sp" />
+    </LinearLayout>
+</ScrollView>

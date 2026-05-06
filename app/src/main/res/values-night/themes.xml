@@ -1,0 +1,31 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Base.Theme.MyApplication" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/theme_control_gray</item>
+        <item name="colorOnPrimary">@color/text_primary</item>
+        <item name="colorPrimaryContainer">@color/bg_card</item>
+        <item name="colorOnPrimaryContainer">@color/text_primary</item>
+        <item name="colorSecondary">@color/theme_control_gray</item>
+        <item name="colorSurface">@color/bg_panel</item>
+        <item name="android:colorBackground">@color/bg_root</item>
+        <item name="android:statusBarColor">@color/bg_root</item>
+        <item name="android:navigationBarColor">@color/bg_root</item>
+        <item name="colorControlHighlight">#33FFFFFF</item>
+    </style>
+
+    <style name="Theme.SensorCalibration" parent="Theme.MyApplication">
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/white</item>
+        <item name="android:textColorTertiary">@color/text_secondary</item>
+        <item name="colorOnSurface">@color/white</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="android:editTextColor">@color/white</item>
+    </style>
+
+    <style name="Theme.DebugStats" parent="Theme.MyApplication">
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/white</item>
+        <item name="colorOnSurface">@color/white</item>
+        <item name="colorOnSurfaceVariant">@color/white</item>
+    </style>
+</resources>

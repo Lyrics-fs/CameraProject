@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 与预览 HUD 一致：半透明黑底，用于左下折叠内容区 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#66000000" />
+    <corners android:radius="6dp" />
+</shape>
