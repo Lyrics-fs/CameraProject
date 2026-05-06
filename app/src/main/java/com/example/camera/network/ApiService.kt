@@ -1,25 +1,24 @@
 package com.example.camera.network
 
-import com.example.camera.calibration.model.CalibrationUploadData
-import com.example.camera.calibration.model.DeviceProfile
+import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import retrofit2.Call
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
-import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface ApiService {
 
-    @POST("/api/calibration/upload")
-    fun uploadCalibrationData(@Body data: CalibrationUploadData): Call<UploadResponse>
+    /** 阿里云 FC：按机型查询云端标定（查表 / 曲线等，由服务端 JSON 决定）。 */
+    @GET("query")
+    fun queryCalibration(@Query("model") model: String): Call<ResponseBody>
 
-    /**
-     * 批量上传：合并多条 [CalibrationUploadData] 为一次请求。
-     * 若服务端仅提供单条路径，可将此处改为与 [uploadCalibrationData] 相同 path 并调整后端契约。
-     */
-    @POST("/api/calibration/upload/batch")
-    fun uploadCalibrationBatch(@Body body: CalibrationUploadBatchRequest): Call<UploadResponse>
+    /** 健康检查。 */
+    @GET("ping")
+    fun ping(): Call<ResponseBody>
 
-    @GET("/api/device-profile/{deviceModel}")
-    fun getDeviceProfile(@Path("deviceModel") model: String): Call<DeviceProfile>
+    /** Level2 达标后上报 Debevec 曲线与 K 等（JSON body）。 */
+    @POST("upload-curve")
+    fun uploadCurve(@Body body: RequestBody): Call<ResponseBody>
 }

@@ -2,6 +2,9 @@ package com.example.camera.presenter;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.util.Size;
@@ -9,7 +12,10 @@ import android.util.Range;
 
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
+import androidx.lifecycle.LiveData;
+import androidx.lifecycle.MutableLiveData;
 
+import com.example.camera.BuildConfig;
 import com.example.camera.R;
 import com.example.camera.contract.CameraContract;
 import com.example.camera.data.CalibrationRepository;
@@ -20,9 +26,16 @@ import com.example.camera.model.calibration.AbsoluteLuminanceCalibration;
 import com.example.camera.model.calibration.CalibrationFactor;
 import com.example.camera.model.calibration.DebevecSolveResult;
 import com.example.camera.model.calibration.DebevecSolver;
+import com.example.camera.model.calibration.LookupEntry;
+import com.example.camera.model.calibration.LookupTable;
+import com.example.camera.model.calibration.LookupTableRepository;
+import com.example.camera.model.calibration.LumaMetrics;
+import com.example.camera.network.CloudRepository;
+import com.example.camera.upload.LookupTableUploadScheduler;
 import com.example.camera.presenter.state.AutoTuneState;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -49,6 +62,9 @@ public class CameraPresenter implements CameraContract.Presenter {
     private static final int MANUAL_SAFE_MAX_ISO = 800;
     private static final long MANUAL_SAFE_MIN_EXPOSURE_NS = 2_000_000L;   // 2ms
     private static final long MANUAL_SAFE_MAX_EXPOSURE_NS = 33_000_000L;  // ~1/30s
+    /** Level2 云端上报：与 UI 文案「至少 8 次」一致。 */
+    private static final int MIN_DEBEVEC_FRAMES_FOR_CLOUD_UPLOAD = 8;
+    private static final double MIN_DEBEVEC_R2_FOR_CLOUD_UPLOAD = 0.85;
     private static final int PREVIEW_SAFE_MIN_ISO = 100;
     private static final int PREVIEW_SAFE_MAX_ISO = 800;
     private static final long PREVIEW_SAFE_MIN_EXPOSURE_NS = 2_000_000L;
@@ -93,11 +109,220 @@ public class CameraPresenter implements CameraContract.Presenter {
             AUTO_APPLY_STEP_RATIO_DEFAULT,
             AUTO_APPLY_BV_DELTA_THRESHOLD_DEFAULT
     );
-    
+
+    // Level 1 实验室 DN→L 查表采集与持久化
+    private LookupTableRepository lookupTableRepository;
+    private final List<LookupEntry> level1Samples = new ArrayList<>();
+    private final MutableLiveData<String> level1State = new MutableLiveData<>("已采集: 0 组");
+
     public CameraPresenter(CameraContract.View view, Context context) {
         this.view = view;
         this.appContext = context != null ? context.getApplicationContext() : null;
         this.model = new CameraModel(context);
+        initLevel1(context);
+    }
+
+    public void initLevel1(Context context) {
+        if (context != null) {
+            lookupTableRepository = new LookupTableRepository(context);
+        }
+    }
+
+    /**
+     * 采集一组实验室查表样本（灰卡平均 DN + 亮度计 cd/m²）。
+     */
+    public void addLevel1Sample(double dn, double luminance) {
+        level1Samples.add(new LookupEntry(dn, luminance));
+        level1State.postValue("已采集: " + level1Samples.size() + " 组");
+    }
+
+    /**
+     * 清空当前会话中尚未保存的采样（不影响已写入本地的查表）。
+     */
+    public void clearLevel1Samples() {
+        level1Samples.clear();
+        level1State.postValue("已采集: 0 组");
+    }
+
+    /**
+     * 移除最近一次添加的采样；列表为空时无操作。
+     *
+     * @return 是否成功移除一组
+     */
+    public boolean removeLastLevel1Sample() {
+        if (level1Samples.isEmpty()) {
+            return false;
+        }
+        level1Samples.remove(level1Samples.size() - 1);
+        level1State.postValue("已采集: " + level1Samples.size() + " 组");
+        return true;
+    }
+
+    /**
+     * 完成采集并保存查表；至少 5 组（与 {@link LookupTable#isAvailable()} 至少 3 组区分：保存门槛更严）。
+     */
+    public void saveLevel1Table(String modelName) {
+        if (lookupTableRepository == null) {
+            level1State.postValue("未初始化查表仓库");
+            return;
+        }
+        if (level1Samples.size() < 5) {
+            level1State.postValue("至少需要 5 组数据");
+            return;
+        }
+        String name = modelName != null ? modelName : "";
+        LookupTable table = new LookupTable(
+                name,
+                new ArrayList<>(level1Samples),
+                100,
+                System.currentTimeMillis(),
+                ""
+        );
+        lookupTableRepository.save(table);
+        level1Samples.clear();
+        level1State.postValue("已采集: 0 组");
+        uploadLevel1LookupTableToCloud(table);
+    }
+
+    /**
+     * 将已持久化的 Level1 查表上报 FC（成功则 {@link LookupTableRepository#markAsUploaded()}）。
+     * 可在保存后或用户点「再次上传」时调用。
+     */
+    public void retryUploadLevel1Table() {
+        if (lookupTableRepository == null) {
+            view.showToast(appContext.getString(R.string.level1_lookup_retry_no_table));
+            return;
+        }
+        LookupTable table = lookupTableRepository.load();
+        if (table == null || !table.isAvailable() || table.getEntries().size() < 5) {
+            view.showToast(appContext.getString(R.string.level1_lookup_retry_no_table));
+            return;
+        }
+        uploadLevel1LookupTableToCloud(table);
+    }
+
+    /** 当前本地查表是否已标记为 Level1 云端上传成功。 */
+    public boolean isLevel1LookupUploadedToCloud() {
+        return lookupTableRepository != null && lookupTableRepository.isUploaded();
+    }
+
+    private void uploadLevel1LookupTableToCloud(LookupTable table) {
+        if (lookupTableRepository == null || table == null) {
+            return;
+        }
+        if (BuildConfig.LAB_UPLOAD_SECRET == null || BuildConfig.LAB_UPLOAD_SECRET.trim().isEmpty()) {
+            view.showToast(appContext.getString(R.string.level1_lab_secret_not_configured));
+            return;
+        }
+        LookupTableUploadScheduler.enqueue(appContext);
+        view.showToast(appContext.getString(R.string.level1_lookup_upload_queued_wifi));
+    }
+
+    /** 使用已持久化查表插值得到 L（cd/m²）；不可用返回 NaN。 */
+    public double lookupLevel1(double dn) {
+        if (lookupTableRepository == null) {
+            return Double.NaN;
+        }
+        LookupTable table = lookupTableRepository.load();
+        if (table == null || !table.isAvailable()) {
+            return Double.NaN;
+        }
+        Double result = table.lookup(dn);
+        return result != null ? result : Double.NaN;
+    }
+
+    /** Level 2/3：Debevec g(DN)+K。 */
+    public double computeLuminanceFromDebevec(double dn) {
+        if (!(model instanceof CameraModel)) {
+            return Double.NaN;
+        }
+        return ((CameraModel) model).computeLFromDn(dn);
+    }
+
+    /**
+     * 兜底：通用先验 L = 2.9×exp(0.729×BV)，BV 由 DN 估计（与历史文档一致，非物理标定主路径）。
+     */
+    public double computeDefaultLuminance(double dn) {
+        if (!Double.isFinite(dn)) {
+            return Double.NaN;
+        }
+        double bv = LumaMetrics.bvFromDn(dn);
+        if (!Double.isFinite(bv)) {
+            return Double.NaN;
+        }
+        double l = 2.9 * Math.exp(0.729 * bv);
+        return Double.isFinite(l) ? l : Double.NaN;
+    }
+
+    /**
+     * 三级优先级：Level1 查表 → Debevec+K → 先验指数。
+     */
+    public double computeLuminance(double dn) {
+        double l1 = lookupLevel1(dn);
+        if (Double.isFinite(l1)) {
+            return l1;
+        }
+        double l2 = computeLuminanceFromDebevec(dn);
+        if (Double.isFinite(l2)) {
+            return l2;
+        }
+        return computeDefaultLuminance(dn);
+    }
+
+    /**
+     * 与 {@link #computeLuminance(double)} 分支对应的简短来源标记（HUD）。
+     */
+    public String getLuminanceSourceTag(double dn) {
+        if (Double.isFinite(lookupLevel1(dn))) {
+            if (lookupTableRepository != null) {
+                LookupTable t = lookupTableRepository.load();
+                if (t != null && t.getSource() != null && !t.getSource().isEmpty()) {
+                    return t.getSource();
+                }
+            }
+            return "查表";
+        }
+        if (Double.isFinite(computeLuminanceFromDebevec(dn))) {
+            return "标定";
+        }
+        return "先验";
+    }
+
+    /** 是否已持久化 Debevec {@code g(DN)}（不含是否已有 K）。 */
+    public boolean hasDebevecG() {
+        CalibrationRepository r = getCalibrationRepository();
+        return r != null && r.hasDebevecG();
+    }
+
+    public LiveData<String> getLevel1State() {
+        return level1State;
+    }
+
+    public List<LookupEntry> getLevel1Samples() {
+        return Collections.unmodifiableList(new ArrayList<>(level1Samples));
+    }
+
+    public boolean hasLevel1Table() {
+        return lookupTableRepository != null && lookupTableRepository.isAvailable();
+    }
+
+    /** 当前已保存查表的简要信息（DN 范围为排序后首尾）。 */
+    public String getLevel1TableInfo() {
+        if (lookupTableRepository == null) {
+            return "无查表数据";
+        }
+        LookupTable table = lookupTableRepository.load();
+        if (table == null || !table.isAvailable()) {
+            return "无查表数据";
+        }
+        List<LookupEntry> sorted = table.getSortedEntries();
+        if (sorted.isEmpty()) {
+            return "无查表数据";
+        }
+        return "查表: " + table.getEntries().size() + " 组, DN范围 "
+                + String.format(Locale.US, "%.0f-%.0f",
+                sorted.get(0).getDn(),
+                sorted.get(sorted.size() - 1).getDn());
     }
 
     public void setCameraRanges(Range<Integer> isoRange, Range<Long> exposureRange, float aperture) {
@@ -412,11 +637,12 @@ public class CameraPresenter implements CameraContract.Presenter {
     private void emitCenterLFromMeanY(double meanY) {
         lastEmittedCenterMeanDn = meanY;
         if (!(model instanceof CameraModel)) {
-            view.updateCenterLuminance(Double.NaN, meanY);
+            view.updateCenterLuminance(Double.NaN, meanY, null);
             return;
         }
-        double l = ((CameraModel) model).computeLFromDn(meanY);
-        view.updateCenterLuminance(l, meanY);
+        double l = computeLuminance(meanY);
+        String tag = Double.isFinite(l) ? getLuminanceSourceTag(meanY) : null;
+        view.updateCenterLuminance(l, meanY, tag);
     }
 
     public void applyLatestExposureRecommendation() {
@@ -781,7 +1007,8 @@ public class CameraPresenter implements CameraContract.Presenter {
      */
     public CalibrationFactor calibrateAbsoluteLuminanceFromNormRect(
             float nl, float nt, float nr, float nb,
-            double knownLuminanceCdM2
+            double knownLuminanceCdM2,
+            int absoluteCalibrationLevel
     ) {
         CalibrationRepository repo = getCalibrationRepository();
         if (repo == null) {
@@ -818,7 +1045,7 @@ public class CameraPresenter implements CameraContract.Presenter {
         }
         Rect r = new Rect(x0, y0, x1, y1);
         CalibrationFactor f = AbsoluteLuminanceCalibration.calibrateAbsoluteLuminance(
-                image, w, r, knownLuminanceCdM2, g);
+                image, w, r, knownLuminanceCdM2, g, absoluteCalibrationLevel);
         repo.saveCalibrationFactor(f);
         return f;
     }
@@ -833,7 +1060,12 @@ public class CameraPresenter implements CameraContract.Presenter {
      * 在后台线程对曝光序列灰度栈做 Debevec–Malik 解算，成功后 {@link #saveDebevecG(double[])} 并回调
      * {@link CameraContract.View#onDebevecGSaved()}。
      */
-    public void solveAndSaveDebevecGFromFrames(List<ExposureSequenceCapture.CapturedFrame> frames) {
+    /**
+     * @param sequenceIso 曝光序列采集时使用的 ISO（与解算帧一致，供云端 upload 字段）
+     */
+    public void solveAndSaveDebevecGFromFrames(
+            List<ExposureSequenceCapture.CapturedFrame> frames,
+            int sequenceIso) {
         analysisExecutor.execute(() -> {
             try {
                 if (frames == null || frames.size() < 4) {
@@ -863,6 +1095,13 @@ public class CameraPresenter implements CameraContract.Presenter {
                         200
                 );
                 saveDebevecG(result.getG());
+                CalibrationRepository repoMeta = getCalibrationRepository();
+                if (repoMeta != null) {
+                    repoMeta.saveDebevecSolveMetadata(
+                            result.getRSquaredLogDeltaT(),
+                            frames.size(),
+                            sequenceIso);
+                }
                 lastDebevecDiagnosticsSummary = String.format(Locale.US,
                         "g(DN) 已保存，R²_lnΔt = %.3f",
                         result.getRSquaredLogDeltaT());
@@ -870,12 +1109,68 @@ public class CameraPresenter implements CameraContract.Presenter {
                         "Debevec g(DN) 已保存（校验 R²_lnΔt = %.3f）",
                         result.getRSquaredLogDeltaT()));
                 view.updateCalibrationStatus(String.format(Locale.US,
-                        "Debevec g(DN) 已保存，R²_lnΔt=%.3f；可输入灰卡亮度做绝对标定",
+                        "Debevec g(DN) 已保存，R²_lnΔt=%.3f；可用亮度计或传感器估算(L3)做绝对标定",
                         result.getRSquaredLogDeltaT()));
                 view.onDebevecGSaved();
             } catch (Exception e) {
                 String msg = e.getMessage();
                 view.showToast(msg != null ? msg : "Debevec 解算失败");
+            }
+        });
+    }
+
+    /**
+     * 亮度计绝对标定（Level2）成功后：若本机 Debevec 解算达标（帧数、R²、非 L3），在后台尝试上报曲线；不阻塞 UI。
+     */
+    public void scheduleLevel2CurveUploadIfEligibleAfterMeterCalibration() {
+        analysisExecutor.execute(() -> {
+            CalibrationRepository repo = getCalibrationRepository();
+            if (repo == null) {
+                return;
+            }
+            CalibrationFactor f = repo.loadCalibrationFactor();
+            if (f == null || !f.isValid() || f.isSensorLuxEstimate()) {
+                return;
+            }
+            if (!repo.hasDebevecG()) {
+                return;
+            }
+            int sampleCount = repo.getDebevecFrameCountForUpload();
+            double r2 = repo.getDebevecRSquaredLogDeltaTForUpload();
+            if (sampleCount < MIN_DEBEVEC_FRAMES_FOR_CLOUD_UPLOAD
+                    || !Double.isFinite(r2)
+                    || r2 < MIN_DEBEVEC_R2_FOR_CLOUD_UPLOAD) {
+                return;
+            }
+            double[] g = repo.loadDebevecG();
+            if (g == null || g.length < 256) {
+                return;
+            }
+            int iso = repo.getDebevecSequenceIsoForUpload();
+            int grey = (int) Math.round(f.greyCardPixelValue);
+            int dnMin = clampInt(grey - 40, 0, 255);
+            int dnMax = clampInt(grey + 40, 0, 255);
+            if (dnMin > dnMax) {
+                int t = dnMin;
+                dnMin = dnMax;
+                dnMax = t;
+            }
+            boolean ok = CloudRepository.uploadCurve(
+                    appContext,
+                    Build.MODEL,
+                    g,
+                    f.k,
+                    f.greyCardPixelValue,
+                    r2,
+                    dnMin,
+                    dnMax,
+                    sampleCount,
+                    iso,
+                    BuildConfig.VERSION_NAME);
+            if (!ok) {
+                new Handler(Looper.getMainLooper()).post(
+                        () -> view.showToast(
+                                appContext.getString(R.string.level2_curve_upload_local_only)));
             }
         });
     }

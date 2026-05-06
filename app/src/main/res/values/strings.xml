@@ -1,5 +1,8 @@
 <resources>
     <string name="app_name">CameraProject</string>
+    <string name="curve_upload_local_only">数据仅保存在本地</string>
+    <!-- Level2：Debevec 响应曲线上传失败（与 Level1 查表上传文案区分） -->
+    <string name="level2_curve_upload_local_only">Level 2 响应曲线未上传云端，数据仅保存在本机。</string>
     <string name="center_luminance_placeholder">L: -- cd/m²</string>
 
     <!-- 标定：环境光与灰卡引导 -->
@@ -7,20 +10,53 @@
     <string name="calibration_gray_card_hint">请将 18% 标准中性灰卡置于预览画面中央，约占画面 1/4～1/3，卡面与镜头尽量平行，避免高光反光正对相机。</string>
     <string name="calibration_gray_card_tips">· 光线：均匀漫射照明，避免阳光直射与强烈阴影\n· 曝光：可手动微调 ISO/快门，使灰卡区域亮度适中（勿过曝或死黑）\n· 流程：至少 8 次有效采样；每次改变曝光后稍等稳定再点「采样」\n· 传感器：留意上方照度读数，稳定后再采样；勿遮挡机身环境光传感器</string>
     <string name="calibration_no_light_sensor">当前设备无环境光传感器，无法进行真实亮度标定</string>
-    <string name="calibration_ambient_placeholder">当前照度: -- lux (≈ -- cd/m²)</string>
-    <string name="calibration_ambient_format">当前照度: %1$.1f lux (≈ %2$.2f cd/m²)</string>
+    <string name="calibration_ambient_placeholder">照度: -- lux\n亮度: -- cd/m²</string>
+    <string name="calibration_ambient_format">照度: %1$.1f lux\n亮度: %2$.2f cd/m²</string>
     <string name="calibration_lux_too_low">光线过暗，建议增加照明</string>
     <string name="calibration_lux_too_high">光线过强，建议移至阴凉处</string>
     <string name="calibration_capture_no_ambient">无法获取环境光照度，请检查光线传感器或移动手机位置</string>
     <string name="calibration_ambient_unstable">环境光照度变化较快，请保持稳定后重试采样</string>
-    <string name="debevec_workflow_hint">建议顺序：① 曝光序列求 g → ② 圈选灰卡 → ③ 填亮度计读数并保存 K</string>
-    <string name="grey_card_mode_hint">⚠ 请拖动矩形框，使其恰好覆盖灰卡本体，避免包含边缘、手指、阴影</string>
+    <string name="debevec_workflow_hint">建议顺序：① 曝光序列求 g → ② 圈选灰卡 → ③ 亮度计实测或传感器估算(L3)后保存 K</string>
+    <string name="abs_source_meter">亮度计实测</string>
+    <string name="abs_source_sensor_l3">传感器估算（本地 L3）</string>
+    <string name="abs_l3_estimate_format">估算亮度 ≈ %1$.1f cd/m²（校准后 lux %2$.1f）</string>
+    <string name="abs_l3_waiting_sensor">估算亮度 ≈ —（等待环境光传感器…）</string>
+    <string name="abs_l3_sensor_unavailable">当前设备无环境光传感器，请改用亮度计</string>
+    <string name="abs_btn_save_meter">计算并保存校准系数</string>
+    <string name="abs_btn_save_sensor">确认估算亮度并保存 K（L3）</string>
+    <string name="grey_card_mode_hint">请仅圈选灰卡本体：拖动四角将矩形缩至卡面内，勿包含背景、桌面、手指与阴影。</string>
     <string name="grey_card_action_cancel">取消</string>
     <string name="grey_card_action_confirm">确认圈选 ✓</string>
     <string name="grey_card_region_unselected">● 灰卡区域: 未圈选</string>
     <string name="grey_card_region_selected_pixels">● 灰卡区域: 已圈选 %1$d×%2$d 像素</string>
     <string name="grey_card_region_selected_no_analysis">● 灰卡区域: 已圈选</string>
     <string name="grey_card_confirm_invalid">请拖动四角将选区放大后再确认</string>
+    <string name="grey_card_selection_enter_toast">请仅圈选灰卡本体，避免把背景与阴影圈入选区。</string>
+    <string name="level1_lookup_grey_hint">查表采集与下方「③ 绝对亮度」共用同一灰卡选区；请先点按钮在预览上圈选。</string>
+    <string name="level1_grey_status_pending">● Level1 灰卡选区: 未圈选</string>
+    <string name="level1_undo_last_sample">撤销上一组</string>
+    <string name="level1_undo_nothing_toast">当前没有可撤销的采样</string>
+    <string name="level1_clear_samples">清空已采集</string>
+    <string name="level1_clear_samples_confirm">确定清空当前 %d 组数据？（尚未保存的采样将丢弃）</string>
+    <string name="level1_lookup_saved_local">查表已保存在本机</string>
+    <string name="level1_lookup_upload_success">Level 1 查表已同步至云端</string>
+    <string name="level1_lookup_upload_queued_wifi">查表云端上传已排队：连接 Wi‑Fi（非计费网络）后将自动重试；成功或失败会有提示。</string>
+    <string name="level1_lookup_upload_fail">查表已保存在本机。Level 1 云端上传失败：%1$s</string>
+    <string name="level1_lookup_cloud_status_uploaded">● Level 1 云端：查表已上传</string>
+    <string name="level1_lookup_cloud_status_pending">● Level 1 云端：查表尚未上传或待重试</string>
+    <string name="level1_lookup_upload_hint">重新「完成采集并保存查表」会清除云端已上传标记，需再次上传。</string>
+    <string name="level1_lookup_retry_upload">再次上传当前查表（Level 1）</string>
+    <string name="level1_lookup_retry_no_table">无已保存查表或不足 5 组，无法上传</string>
+    <string name="level1_lab_secret_not_configured">未配置 LAB_UPLOAD_SECRET，无法上传查表。请在项目根目录 local.properties 添加与云函数 LAB_SECRET 一致的值后重新编译，或使用 -PLAB_UPLOAD_SECRET=… 注入。</string>
+    <string name="level1_upload_table_response_unparsed">无法解析服务器响应（HTTP %1$d）。%2$s</string>
+    <string name="level1_toggle_label_collapsed">▶ Level 1 查表法采集</string>
+    <string name="level1_toggle_label_expanded">▼ Level 1 查表法采集</string>
+    <string name="level2_debevec_toggle_collapsed">▶ Level 2 响应曲线 (Debevec)</string>
+    <string name="level2_debevec_toggle_expanded">▼ Level 2 响应曲线 (Debevec)</string>
+    <string name="level2_debevec_status_abs_meter">Level 2：g(DN) 与绝对亮度均已标定（亮度计）</string>
+    <string name="level2_debevec_status_abs_l3">Level 2：g(DN) 与 K 已标定（本地 L3·lux 估算）\n※ 传感器估算为参考值，精度低于亮度计；中心 L 为估算值，精度有限。</string>
+    <string name="level2_debevec_status_g_only">Level 2：g(DN) 已保存，待灰卡绝对亮度校准</string>
+    <string name="level2_debevec_status_none">Level 2：响应曲线未标定</string>
     <string name="panel_calibration_status_hint">响应曲线与绝对亮度：请展开预览左下角「响应曲线标定 (Debevec)」</string>
     <string name="calibration_sensor_indicator_content_desc">环境光传感器状态</string>
     <string name="calibration_fit_quality_low">拟合质量较低，建议重新标定</string>
@@ -33,46 +69,26 @@
     <string name="settings_restore_curve_summary">清除本机旧版 A/B 指数曲线相关偏好项（不影响 Debevec 与灰卡绝对标定）。</string>
     <string name="settings_restore_curve_done">已清除旧版曲线数据</string>
 
-    <string name="share_dialog_title">分享标定数据？</string>
-    <string name="share_dialog_message">您完成的标定结果可以帮助改进同型号设备的亮度测量精度。\n\n分享内容：\n✓ 设备型号\n✓ 曲线参数 a、b\n✓ 标定质量（R²）\n✗ 不包含任何个人隐私</string>
-    <string name="share_dialog_privacy">查看隐私声明</string>
-    <string name="share_dialog_allow">允许</string>
-    <string name="share_dialog_deny">拒绝</string>
-    <string name="share_dialog_never_ask">不再询问</string>
-
     <string name="settings_title">设置</string>
-    <string name="settings_share_data_title">数据分享</string>
-    <string name="settings_share_data_summary">开启后，在您同意的前提下可将匿名标定摘要用于改进同机型曲线（不含个人隐私）。</string>
-    <string name="settings_reset_auth">重置授权</string>
-    <string name="settings_reset_auth_hint">清除「不再询问」与授权状态，下次高质量标定后可再次弹出询问。</string>
-    <string name="settings_reset_auth_done">已重置分享授权状态</string>
-    <string name="settings_pending_uploads_zero">有 0 条数据待上传</string>
-    <string name="settings_pending_uploads_count">有 %1$d 条数据待上传</string>
-    <string name="settings_wifi_only_auto_title">仅 Wi‑Fi 下自动上传</string>
-    <string name="settings_wifi_only_auto_summary">开启后，自动同步仅在非计费网络（通常为 Wi‑Fi）下进行；关闭后可在移动网络下自动上传。「立即上传」始终可在任意已连接网络下尝试。</string>
-    <string name="settings_upload_now">立即上传</string>
-    <string name="settings_upload_status_idle">上传：空闲</string>
-    <string name="settings_upload_status_enqueued">上传：已排队，等待网络…</string>
-    <string name="settings_upload_status_running">上传：进行中…</string>
-    <string name="settings_upload_status_running_detail">上传：进行中（待处理 %1$d 条，本批 %2$d 条，已上传 %3$d 条）</string>
-    <string name="settings_upload_status_success">上传：已完成</string>
-    <string name="settings_upload_status_failed">上传：失败（%1$s）</string>
-    <string name="settings_upload_status_blocked">上传：等待网络或系统调度</string>
-    <string name="settings_upload_need_share">请先开启「数据分享」后再上传</string>
-    <string name="settings_upload_enqueued_toast">已加入上传队列</string>
-    <string name="settings_upload_unknown_error">未知错误</string>
-
-    <string name="privacy_share_title">标定数据分享说明</string>
-    <string name="privacy_share_body" formatted="false">【用途】\n您选择分享的标定摘要（设备型号、曲线参数 a 与 b、拟合优度 R²、样本数量、应用与系统版本等非标识信息）仅用于改进同型号设备的默认亮度响应模型或统计分析，不用于广告定向或个人画像。\n\n【存储与传输】\n数据先保存在本机数据库中，在联网且您已授权时可能上传至应用提供方服务器；传输过程建议使用加密通道（由正式服务端配置决定）。服务器侧应遵循最小必要原则存储与聚合。\n\n【不包含的个人信息】\n不包含姓名、手机号、邮箱、精确地理位置、通讯录、照片内容、账号标识符、IMEI/Android ID 等可识别特定个人的信息。\n\n【您的控制】\n您可在「设置」中关闭「数据分享」或「重置授权」；关闭后新的标定结果不会作为分享数据保存上传（已上传数据由服务端策略管理）。\n\n【说明】\n本说明为应用内摘要，不构成法律文件；正式版本以隐私政策全文为准。</string>
+    <string name="settings_cloud_upload_hint">Level 1 查表与 Level 2 Debevec 曲线上传在主界面标定区完成（需 LAB_UPLOAD_SECRET、非计费网络等，详见 README）。本页已移除旧版「数据分享」与基于 Room 的上传队列。</string>
+    <string name="settings_calibration_upload_privacy">隐私说明：使用亮度计完成绝对标定且 Debevec 达标时，曲线数据可能在后台自动上传至实验室服务。上传内容仅为匿名标定参数（如机型、g、K、R²、帧数、应用版本等），不含姓名、照片、IMEI、精确位置等可识别个人的信息。</string>
+    <string name="calibration_upload_privacy_notice">上传内容仅为匿名标定参数，不含个人身份信息。</string>
+    <string name="abs_l3_precision_notice">当前为传感器估算路径：结果为参考值，精度低于亮度计标定（Level 2 亮度计）。</string>
+    <string name="abs_calibration_result_l3_line">K = %1$.4f（L3 估算参考 %2$.1f cd/m²）</string>
+    <string name="abs_calibration_result_meter_line">K = %1$.4f（灰卡 %2$.1f cd/m²）</string>
+    <string name="abs_l3_calibrate_done_toast">本地 L3 标定完成，K = %1$.4f（估算 L ≈ %2$.1f cd/m²，灰卡 DN ≈ %3$.1f）</string>
+    <string name="level2_meter_calibrate_done_toast">绝对亮度标定完成（亮度计），K = %1$.4f（灰卡处 DN ≈ %2$.1f）</string>
+    <string name="debevec_sequence_dialog_title">Debevec 曝光序列</string>
+    <string name="debevec_sequence_dialog_message">将固定 ISO=%1$d，连拍 %2$d 张不同快门（约 1EV 间隔）。\n\n拍摄全程请使用三脚架或稳定支撑，保持手机与场景完全静止，不要触碰或移动机身。\n\n请务必保持手机完全不动，否则会影响 g(DN) 标定质量。</string>
+    <string name="debevec_sequence_dialog_start">开始</string>
+    <string name="debevec_sequence_dialog_cancel">取消</string>
+    <string name="debevec_sequence_capture_toast">正在连拍，请保持手机完全不动…</string>
     <string name="calibration_light_sensor_no_feature">系统未声明环境光传感器，无法进行真实亮度标定</string>
     <string name="calibration_light_sensor_no_hardware">未检测到可用的环境光传感器（可能被厂商裁剪或当前为模拟器），无法进行真实亮度标定</string>
-    <string name="meter_calibration_panel_title">亮度计校准（仅 Debug）</string>
-    <string name="meter_calibration_toggle_expand">亮度计校准 ▾</string>
-    <string name="meter_calibration_toggle_collapse">亮度计校准 ▴</string>
 
     <string name="user_help_title">使用说明</string>
     <string name="user_help_chip">使用说明</string>
-    <string name="user_help_body" formatted="false">【切换模式】在「跟随测光建议」与「完全手控曝光」之间切换：推荐模式便于快速拍准；手动模式便于固定参数或刻意欠/过曝。\n\n【应用推荐值】将当前算出的 ISO/曝光立刻套到相机。\n\n【锁定当前推荐值】构图不变时冻结曝光读数，避免轻微晃动导致推荐值跳动。\n\n【高级参数】调节自动微调的积极程度：稳定帧越多越稳但反应慢；步进与 BV 阈值决定每次改多少、多容易触发调整。\n\n【曲线来源】参数区「曲线来源」表示当前用于换算亮度的模型：默认可为先验公式 L=a×exp(b×BV)；完成本机标定后优先使用「已标定」参数；联网且服务端有同机型标准曲线时，可能在未标定或当前仍为先验/旧云端曲线时应用「云端标准曲线」（不会覆盖已有的本机标定）。若云端曲线明显不准，可在「设置」中「恢复默认曲线」回退到上一条快照或先验。\n\n【首次使用·建议顺序】严肃测量建议先做环境光 lux 校准（可选、建议在实验室；调试包可用亮度计流程），再做成像 BV→L 标定。参考亮度 L 由 lux 经 App 公式换算：L = lux_校准后 × 0.18 / π；未做 lux 校准时「校准后」即原始读数。未校准时也可直接标定，但与亮度计对齐误差通常更大。\n\n【环境光传感器校准（lux，可选）】建议在实验室完成。入口（仅 Debug 构建）：预览左下「亮度计校准」面板最下方「传感器校准」。可选关闭 / 线性（scale、offset）/ 分段线性；「应用推荐参数」需先在亮度计流程中算出推荐；「保存并应用」后，照度与标定流程使用的 lux 均为校准后数值。\n\n【亮度计校准与验证（仅 Debug）】在「亮度计校准」面板可向 CSV 追加原始 lux、亮度计、App 亮度等；有效数据不少于 3 组后可「计算校准参数」（含 2σ 异常点提示），结果可写入传感器校准或在传感器校准页「应用推荐参数」后再保存。训练与验证须分开：在传感器校准页「验证校准效果」于新场景采集 5～10 组，查看报告并可导出 CSV。\n\n【响应曲线标定（BV→L）】入口：预览左下「标定 ▾」→「开始标定」→ 多次「采样」→「完成拟合」。参考 L 来自环境光链路；lux 校准越可靠，参考 L 越接近物理亮度。\n\n【标定·准备】18% 中性灰卡；均匀漫射光、避免直射机身环境光传感器与卡面强反光；手机尽量固定；每次改变光照后等待约 2～3 秒，lux 稳定后再采样。亦可用另一台设备全屏显示灰卡图作权宜（须固定对方屏幕亮度）。\n\n【标定·多组采样】至少 8 组且覆盖暗、中、亮多级，BV 与照度跨度越大通常越可靠。经验参考（以本机照度与画面为准）：暗部约 5～20 lux（BV 约 -3～0）、中灰约 50～200 lux（BV 约 1～4）、高光约 500～2000 lux（BV 约 5～9）。每组：调好光 → 灰卡置于画面中央约占 1/4～1/3、尽量与镜头平行 → 稳定后点「采样」→ 改变光照或曝光后重复。\n\n【实验室数据采集规范】灰卡充满画面中心约 1/3；三脚架固定；每次采样前等待约 2 秒让传感器与曝光稳定；避免光源直射环境光传感器；建议按亮度级别采集约 12～15 组（极暗至极亮）。\n\n【拍照】同时保存原图与伪彩分析图，便于对比真实亮度与可视化分布。\n\n【左上角角标】第一行为 E 值；其下为实时中心亮度 L（cd/m²，由当前活动曲线与画面中心 ROI 估算）；再下为「状态: …」。需恢复相机时，「状态」同行右侧可出现「重试」。未就绪时可见全屏「相机启动中…」。\n\n【导出伪彩图】左侧文字与界面统计一致：平均 RGB、灰度与中心 DN、EXIF BV、标定曲线公式（L 与 BV）、R²、来源（本机标定日期 / 先验 / 云端说明）、中心亮度 L。\n\n【设置与其他】可开启「数据分享」、仅 Wi-Fi 自动上传、手动「立即上传」、恢复默认曲线、重置分享授权；上传仅为匿名标定摘要（详见应用内隐私说明）。仅 Debug 包在设置中提供「后台数据统计」（图表、CSV/JSON 导出、2σ 标记等，供演示），Release 无此入口。</string>
+    <string name="user_help_body" formatted="false">【切换模式】在「跟随测光建议」与「完全手控曝光」之间切换：推荐模式便于快速拍准；手动模式便于固定参数或刻意欠/过曝。\n\n【应用推荐值】将当前算出的 ISO/曝光立刻套到相机。\n\n【锁定当前推荐值】构图不变时冻结曝光读数，避免轻微晃动导致推荐值跳动。\n\n【高级参数】调节自动微调的积极程度：稳定帧越多越稳但反应慢；步进与 BV 阈值决定每次改多少、多容易触发调整。\n\n【曲线来源】参数区「曲线来源」表示当前用于换算亮度的模型：默认可为先验公式 L=a×exp(b×BV)；完成本机标定后优先使用「已标定」参数；联网且服务端有同机型标准曲线时，可能在未标定或当前仍为先验/旧云端曲线时应用「云端标准曲线」（不会覆盖已有的本机标定）。若云端曲线明显不准，可在「设置」中「恢复默认曲线」回退到上一条快照或先验。\n\n【首次使用·建议顺序】严肃测量建议先做环境光 lux 校准（可选、建议在实验室；调试包可用亮度计流程），再做成像 BV→L 标定。参考亮度 L 由 lux 经 App 公式换算：L = lux_校准后 × 0.18 / π；未做 lux 校准时「校准后」即原始读数。未校准时也可直接标定，但与亮度计对齐误差通常更大。\n\n【环境光传感器校准（lux，可选）】建议在实验室完成。入口为「传感器校准」页面（若主界面未提供按钮，可由开发者从 IDE 或 ADB 启动对应 Activity）。可选关闭 / 线性（scale、offset）/ 分段线性；「保存并应用」后，照度与 L3 等链路使用的 lux 均为校准后数值。\n\n【说明】主界面左下角原「亮度计校准」调试面板（CSV 记录与批量拟合）已移除；精细 lux 校准请在「传感器校准」页完成，可使用页内「验证校准效果」等于新场景采集多组数据。\n\n【响应曲线标定（BV→L）】入口：预览左下「标定 ▾」→「开始标定」→ 多次「采样」→「完成拟合」。参考 L 来自环境光链路；lux 校准越可靠，参考 L 越接近物理亮度。\n\n【标定·准备】18% 中性灰卡；均匀漫射光、避免直射机身环境光传感器与卡面强反光；手机尽量固定；每次改变光照后等待约 2～3 秒，lux 稳定后再采样。亦可用另一台设备全屏显示灰卡图作权宜（须固定对方屏幕亮度）。\n\n【标定·多组采样】至少 8 组且覆盖暗、中、亮多级，BV 与照度跨度越大通常越可靠。经验参考（以本机照度与画面为准）：暗部约 5～20 lux（BV 约 -3～0）、中灰约 50～200 lux（BV 约 1～4）、高光约 500～2000 lux（BV 约 5～9）。每组：调好光 → 灰卡置于画面中央约占 1/4～1/3、尽量与镜头平行 → 稳定后点「采样」→ 改变光照或曝光后重复。\n\n【实验室数据采集规范】灰卡充满画面中心约 1/3；三脚架固定；每次采样前等待约 2 秒让传感器与曝光稳定；避免光源直射环境光传感器；建议按亮度级别采集约 12～15 组（极暗至极亮）。\n\n【拍照】同时保存原图与伪彩分析图，便于对比真实亮度与可视化分布。\n\n【左上角角标】第一行为 E 值；其下为实时中心亮度 L（cd/m²，由当前活动曲线与画面中心 ROI 估算）；再下为「状态: …」。需恢复相机时，「状态」同行右侧可出现「重试」。未就绪时可见全屏「相机启动中…」。\n\n【导出伪彩图】左侧文字与界面统计一致：平均 RGB、灰度与中心 DN、EXIF BV、标定曲线公式（L 与 BV）、R²、来源（本机标定日期 / 先验 / 云端说明）、中心亮度 L。\n\n【设置与其他】可「恢复默认曲线」清除旧版 A/B 偏好；标定云端上传请在主界面完成。仅 Debug 包在设置中提供「后台数据统计」（图表、CSV/JSON 导出等，供演示），Release 无此入口。</string>
 
     <!-- 传感器校准（lux） -->
     <string name="sensor_calibration_entry">传感器校准</string>

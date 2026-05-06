@@ -50,14 +50,22 @@ public final class AbsoluteLuminanceCalibration {
     /**
      * 由灰卡区域平均 DN、已知亮度与 {@code g[0..255]} 求标定系数 {@code K = L_real / exp(g[z])}，
      * 其中 {@code z} 为平均 DN 四舍五入到 0～255。
+     *
+     * @param absoluteCalibrationLevel {@link CalibrationFactor#ABS_LEVEL_BRIGHTNESS_METER} 或
+     *                                 {@link CalibrationFactor#ABS_LEVEL_SENSOR_LUX_ESTIMATE}
      */
     public static CalibrationFactor calibrateAbsoluteLuminance(
             byte[] image,
             int imageWidth,
             Rect greyCardRegion,
             double knownLuminance,
-            double[] g
+            double[] g,
+            int absoluteCalibrationLevel
     ) {
+        if (absoluteCalibrationLevel != CalibrationFactor.ABS_LEVEL_BRIGHTNESS_METER
+                && absoluteCalibrationLevel != CalibrationFactor.ABS_LEVEL_SENSOR_LUX_ESTIMATE) {
+            throw new IllegalArgumentException("absoluteCalibrationLevel");
+        }
         if (g == null || g.length < 256) {
             throw new IllegalArgumentException("g must have length at least 256");
         }
@@ -75,7 +83,12 @@ public final class AbsoluteLuminanceCalibration {
             throw new IllegalStateException("invalid relative irradiance exp(g(DN))");
         }
         double k = knownLuminance / eRel;
-        return new CalibrationFactor(k, avgPixel, knownLuminance, System.currentTimeMillis());
+        return new CalibrationFactor(
+                k,
+                avgPixel,
+                knownLuminance,
+                System.currentTimeMillis(),
+                absoluteCalibrationLevel);
     }
 
     /** {@code L = K × E_rel}。 */

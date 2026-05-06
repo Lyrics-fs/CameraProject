@@ -26,7 +26,8 @@
         <activity
             android:name="com.example.camera.MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.MyApplication">
+            android:theme="@style/Theme.MyApplication"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -50,13 +51,6 @@
             android:name="com.example.camera.SettingsActivity"
             android:exported="false"
             android:label="@string/settings_title"
-            android:parentActivityName="com.example.camera.MainActivity"
-            android:theme="@style/Theme.MyApplication" />
-
-        <activity
-            android:name="com.example.camera.PrivacyCalibrationShareActivity"
-            android:exported="false"
-            android:label="@string/privacy_share_title"
             android:parentActivityName="com.example.camera.MainActivity"
             android:theme="@style/Theme.MyApplication" />
 

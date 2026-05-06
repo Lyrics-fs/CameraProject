@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 预览约 2/3：左上 E/状态+使用说明；左下 模式→高级参数→Debevec→亮度计校准(Debug)；下 1/3 参数区 -->
+<!-- 预览约 2/3：左上 E/状态+使用说明；左下 模式→高级参数→Debevec；下 1/3 参数区 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -49,7 +49,7 @@
             android:textSize="11sp"
             android:visibility="gone" />
 
-        <!-- 左下：外壳限高不滚动；响应曲线标定展开区在 sv_debevec_calibration_scroll 内滚动 -->
+        <!-- 左下：外壳限高；查表内容在查表标题下，响应曲线内容仅在 sv_debevec_calibration_scroll 内 -->
         <com.example.camera.ui.MaxHeightLinearLayout
             android:id="@+id/sv_left_preview_controls_column"
             android:layout_width="wrap_content"
@@ -231,15 +231,16 @@
                     app:backgroundTint="@null" />
             </GridLayout>
 
+            <!-- Level 1：标题下 ScrollView 可纵向滚动；响应曲线同 -->
             <LinearLayout
                 android:id="@+id/ll_debevec_calibration_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:orientation="vertical">
 
                 <TextView
-                    android:id="@+id/tv_toggle_debevec_calibration"
+                    android:id="@+id/tv_toggle_level1"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_semi_transparent_black"
@@ -250,7 +251,256 @@
                     android:paddingTop="6dp"
                     android:paddingEnd="6dp"
                     android:paddingBottom="6dp"
-                    android:text="▶ 响应曲线标定 (Debevec)"
+                    android:text="@string/level1_toggle_label_collapsed"
+                    android:textColor="@color/text_primary"
+                    android:textSize="10sp" />
+
+                <ScrollView
+                    android:id="@+id/sv_level1_scroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    android:fadeScrollbars="false"
+                    android:fillViewport="false"
+                    android:overScrollMode="ifContentScrolls"
+                    android:scrollbars="vertical"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:id="@+id/ll_level1_content"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_semi_transparent_black"
+                        android:orientation="vertical"
+                        android:paddingStart="6dp"
+                        android:paddingTop="6dp"
+                        android:paddingEnd="6dp"
+                        android:paddingBottom="6dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:text="调节光源从暗到亮采集，每组输入亮度计读数"
+                        android:textColor="#88FFFFFF"
+                        android:textSize="9sp" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/level1_lookup_grey_hint"
+                        android:textColor="#77FFFFFF"
+                        android:textSize="8sp" />
+
+                    <TextView
+                        android:id="@+id/tv_level1_grey_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/level1_grey_status_pending"
+                        android:textColor="@color/grey_card_status_pending"
+                        android:textSize="9sp" />
+
+                    <Button
+                        android:id="@+id/btn_level1_select_grey_card"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:background="@drawable/bg_preview_hud"
+                        android:minHeight="32dp"
+                        android:stateListAnimator="@null"
+                        android:text="圈选灰卡区域"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp"
+                        app:backgroundTint="@null" />
+
+                    <TextView
+                        android:id="@+id/tv_level1_dn"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:includeFontPadding="false"
+                        android:text="灰卡 DN: ---"
+                        android:textColor="@color/text_primary"
+                        android:textSize="10sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:includeFontPadding="false"
+                            android:text="亮度计:"
+                            android:textColor="#AAFFFFFF"
+                            android:textSize="10sp" />
+
+                        <EditText
+                            android:id="@+id/et_level1_luminance"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:hint="cd/m²"
+                            android:inputType="numberDecimal"
+                            android:minHeight="32dp"
+                            android:textColor="@color/text_primary"
+                            android:textColorHint="@color/text_primary"
+                            android:textSize="10sp" />
+
+                        <Button
+                            android:id="@+id/btn_level1_sample"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_preview_hud"
+                            android:minHeight="32dp"
+                            android:minWidth="52dp"
+                            android:paddingStart="6dp"
+                            android:paddingEnd="6dp"
+                            android:stateListAnimator="@null"
+                            android:text="采集"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="10sp"
+                            app:backgroundTint="@null" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tv_level1_progress"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:includeFontPadding="false"
+                        android:text="已采集: 0 组"
+                        android:textColor="#FFCC00"
+                        android:textSize="10sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btn_level1_undo_sample"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_preview_hud"
+                            android:enabled="false"
+                            android:minHeight="32dp"
+                            android:stateListAnimator="@null"
+                            android:text="@string/level1_undo_last_sample"
+                            android:textAllCaps="false"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="10sp"
+                            app:backgroundTint="@null" />
+
+                        <Button
+                            android:id="@+id/btn_level1_clear_samples"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_preview_hud"
+                            android:enabled="false"
+                            android:minHeight="32dp"
+                            android:stateListAnimator="@null"
+                            android:text="@string/level1_clear_samples"
+                            android:textAllCaps="false"
+                            android:textColor="@color/accent_orange"
+                            android:textSize="10sp"
+                            app:backgroundTint="@null" />
+                    </LinearLayout>
+
+                    <Button
+                        android:id="@+id/btn_level1_save"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/bg_preview_hud"
+                        android:enabled="false"
+                        android:minHeight="32dp"
+                        android:stateListAnimator="@null"
+                        android:text="完成采集并保存查表"
+                        android:textAllCaps="false"
+                        android:textColor="@color/accent_green"
+                        android:textSize="10sp"
+                        app:backgroundTint="@null" />
+
+                    <TextView
+                        android:id="@+id/tv_level1_table_info"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:includeFontPadding="false"
+                        android:text=""
+                        android:textColor="@color/accent_green"
+                        android:textSize="9sp" />
+
+                    <TextView
+                        android:id="@+id/tv_level1_upload_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:includeFontPadding="false"
+                        android:text=""
+                        android:textColor="@color/text_secondary"
+                        android:textSize="8sp"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tv_level1_cloud_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:includeFontPadding="false"
+                        android:text=""
+                        android:textColor="@color/text_secondary"
+                        android:textSize="9sp"
+                        android:visibility="gone" />
+
+                    <Button
+                        android:id="@+id/btn_level1_retry_upload"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:background="@drawable/bg_preview_hud"
+                        android:minHeight="32dp"
+                        android:stateListAnimator="@null"
+                        android:text="@string/level1_lookup_retry_upload"
+                        android:textAllCaps="false"
+                        android:textColor="@color/text_primary"
+                        android:textSize="10sp"
+                        android:visibility="gone"
+                        app:backgroundTint="@null" />
+                    </LinearLayout>
+                </ScrollView>
+
+                <TextView
+                    android:id="@+id/tv_toggle_debevec_calibration"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:background="@drawable/bg_semi_transparent_black"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:includeFontPadding="false"
+                    android:paddingStart="6dp"
+                    android:paddingTop="6dp"
+                    android:paddingEnd="6dp"
+                    android:paddingBottom="6dp"
+                    android:text="@string/level2_debevec_toggle_collapsed"
                     android:textColor="@color/text_primary"
                     android:textSize="10sp" />
 
@@ -274,6 +524,13 @@
                         android:paddingTop="6dp"
                         android:paddingEnd="6dp"
                         android:paddingBottom="6dp"
+                        android:visibility="gone">
+
+                    <LinearLayout
+                        android:id="@+id/ll_debevec_details"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
                         android:visibility="gone">
 
                     <TextView
@@ -458,7 +715,37 @@
                             android:textColor="@color/accent_orange"
                             android:textSize="9sp" />
 
+                        <RadioGroup
+                            android:id="@+id/rg_abs_luminance_source"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:orientation="vertical">
+
+                            <RadioButton
+                                android:id="@+id/rb_abs_source_meter"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:checked="true"
+                                android:includeFontPadding="false"
+                                android:minHeight="28dp"
+                                android:text="@string/abs_source_meter"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="9sp" />
+
+                            <RadioButton
+                                android:id="@+id/rb_abs_source_sensor"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:includeFontPadding="false"
+                                android:minHeight="28dp"
+                                android:text="@string/abs_source_sensor_l3"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="9sp" />
+                        </RadioGroup>
+
                         <LinearLayout
+                            android:id="@+id/ll_abs_meter_input"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
@@ -494,6 +781,24 @@
                                 android:textSize="9sp" />
                         </LinearLayout>
 
+                        <LinearLayout
+                            android:id="@+id/ll_abs_sensor_estimate"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:orientation="vertical"
+                            android:visibility="gone">
+
+                            <TextView
+                                android:id="@+id/tv_abs_sensor_luminance_estimate"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:includeFontPadding="false"
+                                android:text="@string/abs_l3_waiting_sensor"
+                                android:textColor="@color/accent_blue"
+                                android:textSize="9sp" />
+                        </LinearLayout>
+
                         <Button
                             android:id="@+id/btn_absolute_calibrate"
                             android:layout_width="match_parent"
@@ -502,7 +807,7 @@
                             android:background="@drawable/bg_preview_hud"
                             android:enabled="false"
                             android:minHeight="32dp"
-                            android:text="计算并保存校准系数"
+                            android:text="@string/abs_btn_save_meter"
                             android:textAllCaps="false"
                             android:textColor="@color/accent_green"
                             android:textSize="9sp"
@@ -520,202 +825,8 @@
                         android:textSize="9sp"
                         android:visibility="gone" />
                     </LinearLayout>
+                    </LinearLayout>
                 </ScrollView>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/panel_debug_calibration_recorder"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:background="@drawable/bg_preview_hud"
-                android:orientation="vertical"
-                android:paddingStart="2dp"
-                android:paddingTop="2dp"
-                android:paddingEnd="2dp"
-                android:paddingBottom="2dp"
-                android:visibility="gone">
-
-                <Button
-                    android:id="@+id/btn_toggle_meter_calibration"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:background="@drawable/bg_preview_hud"
-                    android:ellipsize="end"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:minHeight="28dp"
-                    android:paddingStart="2dp"
-                    android:paddingTop="2dp"
-                    android:paddingEnd="2dp"
-                    android:paddingBottom="2dp"
-                    android:stateListAnimator="@null"
-                    android:text="@string/meter_calibration_toggle_expand"
-                    android:textAllCaps="false"
-                    android:textColor="@color/accent_orange"
-                    android:textSize="10sp"
-                    app:backgroundTint="@null" />
-
-                <LinearLayout
-                    android:id="@+id/meter_calibration_expand_content"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:orientation="vertical"
-                    android:paddingBottom="0dp"
-                    android:visibility="gone">
-
-                    <GridLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:alignmentMode="alignMargins"
-                        android:columnCount="2"
-                        android:columnOrderPreserved="false"
-                        android:rowCount="2"
-                        android:useDefaultMargins="false">
-
-                        <Button
-                            android:id="@+id/btn_debug_cal_record"
-                            android:layout_width="0dp"
-                            android:layout_height="36dp"
-                            android:layout_row="0"
-                            android:layout_column="0"
-                            android:layout_columnWeight="1"
-                            android:layout_gravity="fill_horizontal"
-                            android:layout_marginEnd="2dp"
-                            android:layout_marginBottom="2dp"
-                            android:background="@drawable/bg_preview_hud"
-                            android:gravity="center"
-                            android:includeFontPadding="false"
-                            android:insetLeft="0dp"
-                            android:insetTop="0dp"
-                            android:insetRight="0dp"
-                            android:insetBottom="0dp"
-                            android:maxLines="1"
-                            android:minWidth="0dp"
-                            android:paddingStart="2dp"
-                            android:paddingTop="0dp"
-                            android:paddingEnd="2dp"
-                            android:paddingBottom="0dp"
-                            android:stateListAnimator="@null"
-                            android:text="记录校准数据"
-                            android:textAllCaps="false"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="8sp"
-                            app:backgroundTint="@null" />
-
-                        <Button
-                            android:id="@+id/btn_debug_cal_export"
-                            android:layout_width="0dp"
-                            android:layout_height="36dp"
-                            android:layout_row="0"
-                            android:layout_column="1"
-                            android:layout_columnWeight="1"
-                            android:layout_gravity="fill_horizontal"
-                            android:layout_marginBottom="2dp"
-                            android:background="@drawable/bg_preview_hud"
-                            android:gravity="center"
-                            android:includeFontPadding="false"
-                            android:insetLeft="0dp"
-                            android:insetTop="0dp"
-                            android:insetRight="0dp"
-                            android:insetBottom="0dp"
-                            android:maxLines="1"
-                            android:minWidth="0dp"
-                            android:paddingStart="2dp"
-                            android:paddingTop="0dp"
-                            android:paddingEnd="2dp"
-                            android:paddingBottom="0dp"
-                            android:stateListAnimator="@null"
-                            android:text="导出CSV"
-                            android:textAllCaps="false"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="8sp"
-                            app:backgroundTint="@null" />
-
-                        <Button
-                            android:id="@+id/btn_debug_cal_clear"
-                            android:layout_width="0dp"
-                            android:layout_height="36dp"
-                            android:layout_row="1"
-                            android:layout_column="0"
-                            android:layout_columnWeight="1"
-                            android:layout_gravity="fill_horizontal"
-                            android:layout_marginEnd="2dp"
-                            android:background="@drawable/bg_preview_hud"
-                            android:gravity="center"
-                            android:includeFontPadding="false"
-                            android:insetLeft="0dp"
-                            android:insetTop="0dp"
-                            android:insetRight="0dp"
-                            android:insetBottom="0dp"
-                            android:maxLines="1"
-                            android:minWidth="0dp"
-                            android:paddingStart="2dp"
-                            android:paddingTop="0dp"
-                            android:paddingEnd="2dp"
-                            android:paddingBottom="0dp"
-                            android:stateListAnimator="@null"
-                            android:text="清除数据"
-                            android:textAllCaps="false"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="8sp"
-                            app:backgroundTint="@null" />
-
-                        <Button
-                            android:id="@+id/btn_debug_cal_compute"
-                            android:layout_width="0dp"
-                            android:layout_height="36dp"
-                            android:layout_row="1"
-                            android:layout_column="1"
-                            android:layout_columnWeight="1"
-                            android:layout_gravity="fill_horizontal"
-                            android:background="@drawable/bg_preview_hud"
-                            android:gravity="center"
-                            android:includeFontPadding="false"
-                            android:insetLeft="0dp"
-                            android:insetTop="0dp"
-                            android:insetRight="0dp"
-                            android:insetBottom="0dp"
-                            android:maxLines="1"
-                            android:minWidth="0dp"
-                            android:paddingStart="2dp"
-                            android:paddingTop="0dp"
-                            android:paddingEnd="2dp"
-                            android:paddingBottom="0dp"
-                            android:stateListAnimator="@null"
-                            android:text="计算校准参数"
-                            android:textAllCaps="false"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="8sp"
-                            app:backgroundTint="@null" />
-                    </GridLayout>
-
-                    <Button
-                        android:id="@+id/btn_sensor_calibration"
-                        android:layout_width="match_parent"
-                        android:layout_height="36dp"
-                        android:layout_marginTop="2dp"
-                        android:background="@drawable/bg_preview_hud"
-                        android:gravity="center"
-                        android:includeFontPadding="false"
-                        android:insetLeft="0dp"
-                        android:insetTop="0dp"
-                        android:insetRight="0dp"
-                        android:insetBottom="0dp"
-                        android:maxLines="1"
-                        android:minWidth="0dp"
-                        android:paddingStart="4dp"
-                        android:paddingTop="0dp"
-                        android:paddingEnd="4dp"
-                        android:paddingBottom="0dp"
-                        android:stateListAnimator="@null"
-                        android:text="@string/sensor_calibration_entry"
-                        android:textAllCaps="false"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="8sp"
-                        app:backgroundTint="@null" />
-                </LinearLayout>
             </LinearLayout>
             </LinearLayout>
         </com.example.camera.ui.MaxHeightLinearLayout>
@@ -773,7 +884,7 @@
                     android:layout_marginTop="2dp"
                     android:fontFamily="monospace"
                     android:includeFontPadding="false"
-                    android:lines="1"
+                    android:maxLines="2"
                     android:text="@string/calibration_ambient_placeholder"
                     android:textColor="@color/text_secondary"
                     android:textSize="10sp" />

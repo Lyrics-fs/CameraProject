@@ -18,6 +18,9 @@ import com.example.camera.contract.CameraContract;
 import com.example.camera.data.CalibrationRepository;
 import com.example.camera.model.calibration.AbsoluteLuminanceCalibration;
 import com.example.camera.model.calibration.CalibrationFactor;
+import com.example.camera.model.calibration.LookupTable;
+import com.example.camera.model.calibration.LookupTableRepository;
+import com.example.camera.model.calibration.LumaMetrics;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -82,11 +85,13 @@ public class CameraModel implements CameraContract.Model {
     private CameraSettings cameraSettings;
     private AppState appState;
     private final CalibrationRepository calibrationRepository;
+    private final LookupTableRepository lookupTableRepository;
 
     public CameraModel(Context context) {
         this.cameraSettings = new CameraSettings();
         this.appState = new AppState();
         this.calibrationRepository = context != null ? new CalibrationRepository(context) : null;
+        this.lookupTableRepository = context != null ? new LookupTableRepository(context) : null;
     }
 
     /**
@@ -406,7 +411,7 @@ public class CameraModel implements CameraContract.Model {
         double centerDnRoi = computeCenterRegionMeanDn(originalBitmap);
         double Lcenter;
         if (Double.isFinite(centerDnRoi)) {
-            double lPhys = computeLFromDn(centerDnRoi);
+            double lPhys = computeDisplayLuminance(centerDnRoi);
             Lcenter = Double.isFinite(lPhys) ? lPhys : (yValue / 255.0 * 400 + 50);
         } else {
             Lcenter = yValue / 255.0 * 400 + 50;
@@ -550,9 +555,15 @@ public class CameraModel implements CameraContract.Model {
             curveFormulaLine = String.format(Locale.US,
                     "曲线公式: L = %.4f × exp(g(DN)) cd/m²",
                     absFactor.k);
-            curveBvLine = String.format(Locale.US,
-                    "  K = %.4f (灰卡 %.1f cd/m²)",
-                    absFactor.k, absFactor.greyCardLuminance);
+            if (absFactor.isSensorLuxEstimate()) {
+                curveBvLine = String.format(Locale.US,
+                        "  K = %.4f (L3 估算参考 %.1f cd/m²)",
+                        absFactor.k, absFactor.greyCardLuminance);
+            } else {
+                curveBvLine = String.format(Locale.US,
+                        "  K = %.4f (灰卡 %.1f cd/m²)",
+                        absFactor.k, absFactor.greyCardLuminance);
+            }
         } else if (hasGOnly) {
             curveFormulaLine = "曲线: 已保存 Debevec g(DN)，待灰卡绝对标定 K";
             curveBvLine = "完成灰卡标定后 L = K × exp(g(DN)) cd/m²";
@@ -562,21 +573,20 @@ public class CameraModel implements CameraContract.Model {
         }
 
         String qualityLine = useDebevecAbs
-                ? "标定: Debevec + 灰卡绝对亮度"
+                ? (absFactor.isSensorLuxEstimate()
+                        ? "标定: Debevec + 传感器估算 K（本地 L3）"
+                        : "标定: Debevec + 灰卡绝对亮度")
                 : (hasGOnly ? "标定: Debevec（缺绝对标定）" : "标定: —");
 
         String sourceLine = useDebevecAbs
                 ? formatDebevecAbsoluteSourceLine(absFactor)
                 : (hasGOnly ? "来源: Debevec g（未绝对校准）" : "来源: 未标定");
 
-        double centerL = Double.isFinite(centerDn) ? computeLFromDn(centerDn) : Double.NaN;
+        double centerL = Double.isFinite(centerDn) ? computeDisplayLuminance(centerDn) : Double.NaN;
         String centerLLine;
         if (Double.isFinite(centerL)) {
-            centerLLine = String.format(Locale.US, "中心亮度: %.1f cd/m²", centerL);
-        } else if (calibrationRepository != null
-                && calibrationRepository.hasDebevecG()
-                && !calibrationRepository.isAbsoluteLuminanceCalibrated()) {
-            centerLLine = "中心亮度: 未绝对校准";
+            centerLLine = String.format(Locale.US, "中心亮度: %.1f cd/m² [%s]",
+                    centerL, luminanceSourceTagForDn(centerDn));
         } else {
             centerLLine = "中心亮度: — cd/m²";
         }
@@ -605,6 +615,14 @@ public class CameraModel implements CameraContract.Model {
     private static String formatDebevecAbsoluteSourceLine(CalibrationFactor factor) {
         if (factor == null || !factor.isValid()) {
             return "来源: Debevec+绝对校准";
+        }
+        if (factor.isSensorLuxEstimate()) {
+            if (factor.calibrationTimestamp > 0L) {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA);
+                return String.format(Locale.CHINA, "来源: 本地 L3·lux 估算 (%s)",
+                        sdf.format(new Date(factor.calibrationTimestamp)));
+            }
+            return "来源: 本地 L3·lux 估算";
         }
         if (factor.calibrationTimestamp > 0L) {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.CHINA);
@@ -693,6 +711,62 @@ public class CameraModel implements CameraContract.Model {
     }
 
     /**
+     * 预览 / 导出伪彩统计与 {@link com.example.camera.presenter.CameraPresenter#computeLuminance(double)} 对齐：
+     * Level1 查表 → Debevec+K → 先验指数。
+     */
+    public double computeDisplayLuminance(double dn) {
+        double l1 = lookupLevel1Table(dn);
+        if (Double.isFinite(l1)) {
+            return l1;
+        }
+        double l2 = computeLFromDn(dn);
+        if (Double.isFinite(l2)) {
+            return l2;
+        }
+        return computeDefaultLuminanceFromDn(dn);
+    }
+
+    private double lookupLevel1Table(double dn) {
+        if (lookupTableRepository == null) {
+            return Double.NaN;
+        }
+        LookupTable table = lookupTableRepository.load();
+        if (table == null || !table.isAvailable()) {
+            return Double.NaN;
+        }
+        Double r = table.lookup(dn);
+        return r != null && Double.isFinite(r) ? r : Double.NaN;
+    }
+
+    private double computeDefaultLuminanceFromDn(double dn) {
+        if (!Double.isFinite(dn)) {
+            return Double.NaN;
+        }
+        double bv = LumaMetrics.bvFromDn(dn);
+        if (!Double.isFinite(bv)) {
+            return Double.NaN;
+        }
+        double l = 2.9 * Math.exp(0.729 * bv);
+        return Double.isFinite(l) ? l : Double.NaN;
+    }
+
+    private String luminanceSourceTagForDn(double dn) {
+        if (Double.isFinite(lookupLevel1Table(dn))) {
+            if (lookupTableRepository != null) {
+                LookupTable t = lookupTableRepository.load();
+                if (t != null && t.getSource() != null && !t.getSource().isEmpty()) {
+                    return t.getSource();
+                }
+            }
+            return "查表";
+        }
+        if (Double.isFinite(computeLFromDn(dn))) {
+            return "标定";
+        }
+        return "先验";
+    }
+
+    /**
      * 由中心 ROI 平均 DN 得到亮度 L（cd/m²）。
      * 仅当已持久化 Debevec {@code g(Z)} 与有效绝对标定系数 {@code K} 时返回有限值，否则为 NaN。
      */
@@ -723,11 +797,17 @@ public class CameraModel implements CameraContract.Model {
         if (calibrationRepository == null) {
             return "未标定";
         }
+        String cloud = calibrationRepository.getDebevecCloudSourceLabel();
+        boolean cloudTag = cloud != null && !cloud.isEmpty();
         if (calibrationRepository.isAbsoluteLuminanceCalibrated()) {
-            return "Debevec + 绝对标定";
+            CalibrationFactor f = calibrationRepository.loadCalibrationFactor();
+            if (f != null && f.isSensorLuxEstimate()) {
+                return cloudTag ? cloud + " · Debevec + 本地 L3（lux）" : "Debevec + 本地 L3（lux）";
+            }
+            return cloudTag ? cloud + " · Debevec + 绝对标定" : "Debevec + 绝对标定";
         }
         if (calibrationRepository.hasDebevecG()) {
-            return "Debevec（待灰卡标定）";
+            return cloudTag ? cloud + "（Debevec g，待灰卡标定）" : "Debevec（待灰卡标定）";
         }
         return "未标定";
     }
@@ -737,11 +817,17 @@ public class CameraModel implements CameraContract.Model {
         if (calibrationRepository == null) {
             return "未标定";
         }
+        String cloud = calibrationRepository.getDebevecCloudSourceLabel();
+        boolean cloudTag = cloud != null && !cloud.isEmpty();
         if (calibrationRepository.isAbsoluteLuminanceCalibrated()) {
-            return "Debevec·已校准";
+            CalibrationFactor f = calibrationRepository.loadCalibrationFactor();
+            if (f != null && f.isSensorLuxEstimate()) {
+                return cloudTag ? "云端·L3" : "Debevec·L3";
+            }
+            return cloudTag ? "云端·已校准" : "Debevec·已校准";
         }
         if (calibrationRepository.hasDebevecG()) {
-            return "Debevec·缺K";
+            return cloudTag ? "云端·缺K" : "Debevec·缺K";
         }
         return "未标定";
     }

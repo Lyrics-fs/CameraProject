@@ -18,6 +18,11 @@ object NetworkModule {
         return retrofit(context.applicationContext).create(ApiService::class.java)
     }
 
+    @JvmStatic
+    fun calibrationApiService(context: Context): CalibrationApiService {
+        return retrofit(context.applicationContext).create(CalibrationApiService::class.java)
+    }
+
     @Synchronized
     private fun retrofit(appContext: Context): Retrofit {
         var r = retrofit
@@ -33,7 +38,7 @@ object NetworkModule {
                 clientBuilder.addInterceptor(logging)
             }
             r = Retrofit.Builder()
-                .baseUrl(BuildConfig.CALIBRATION_API_BASE_URL)
+                .baseUrl(CloudRepository.BASE_URL)
                 .client(clientBuilder.build())
                 .addConverterFactory(GsonConverterFactory.create())
                 .build()

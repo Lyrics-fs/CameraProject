@@ -3,9 +3,9 @@ package com.example.camera
 import android.app.Application
 import android.util.Log
 import com.example.camera.data.local.CalibrationRecordDatabase
+import com.example.camera.sync.CloudCalibrationSync
 import com.example.camera.sync.CurveSyncScheduler
 import com.example.camera.sync.StandardCurveSync
-import com.example.camera.upload.UploadManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,8 +26,12 @@ class CameraApplication : Application() {
             } catch (t: Throwable) {
                 Log.e(TAG, "Calibration DB startup maintenance failed", t)
             }
+            try {
+                CloudCalibrationSync.run(this@CameraApplication)
+            } catch (t: Throwable) {
+                Log.e(TAG, "Cloud calibration sync failed", t)
+            }
         }
-        UploadManager.scheduleAutoUpload(this)
         CurveSyncScheduler.schedulePeriodic(this)
         applicationScope.launch {
             try {

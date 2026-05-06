@@ -1,8 +1,25 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     id 'org.jetbrains.kotlin.kapt'
+}
+
+/** Level1 `/upload-table` 与云函数 `LAB_SECRET` / app.py 校验一致；值见 README「实验室上传密钥」；来自 local.properties 或 `-PLAB_UPLOAD_SECRET=`，勿提交密钥。 */
+String readLabUploadSecretForBuildConfig(Project proj) {
+    def props = new Properties()
+    def f = proj.rootProject.file("local.properties")
+    if (f.exists()) {
+        f.withInputStream { props.load(it) }
+    }
+    def fromFile = props.getProperty("LAB_UPLOAD_SECRET", "")?.trim()
+    if (fromFile) {
+        return fromFile
+    }
+    def fromProp = proj.findProperty("LAB_UPLOAD_SECRET")
+    return fromProp != null ? fromProp.toString().trim() : ""
 }
 
 android {
@@ -17,10 +34,16 @@ android {
         versionName "1.0"
 
         // 标定数据上传 API 根地址（末尾保留 /）；若已改用 Supabase 可忽略
-        buildConfigField "String", "CALIBRATION_API_BASE_URL", "\"https://api.example.com/\""
+        buildConfigField "String", "CALIBRATION_API_BASE_URL", "\"https://calibration-api-jvbdiusqed.cn-hangzhou.fcapp.run/\""
         // Supabase：在控制台复制 Project URL 与 anon public key
         buildConfigField "String", "SUPABASE_URL", "\"https://YOUR_PROJECT_REF.supabase.co\""
         buildConfigField "String", "SUPABASE_ANON_KEY", "\"YOUR_SUPABASE_ANON_KEY\""
+
+        def rawLabSecret = readLabUploadSecretForBuildConfig(project)
+        def escLabSecret = rawLabSecret
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+        buildConfigField "String", "LAB_UPLOAD_SECRET", "\"${escLabSecret}\""
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -29,6 +52,11 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
         }
     }
     compileOptions {
@@ -82,6 +110,8 @@ dependencies {
     implementation 'org.apache.commons:commons-math3:3.6.1'
     testImplementation libs.junit
     testImplementation libs.mockito.core
+    testImplementation libs.mockwebserver
+    testImplementation libs.robolectric
     androidTestImplementation libs.ext.junit
     androidTestImplementation libs.espresso.core
     debugImplementation libs.mpandroidchart

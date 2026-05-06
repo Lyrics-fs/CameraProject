@@ -1,6 +1,9 @@
 package com.example.camera.contract;
 
 import android.graphics.Bitmap;
+
+import androidx.annotation.Nullable;
+
 import com.example.camera.model.CameraSettings;
 import com.example.camera.model.AppState;
 import com.example.camera.model.CameraModel;
@@ -20,6 +23,11 @@ public interface CameraContract {
         void updatePhotoCount(int count);
         void showError(String error);
         void showToast(String message);
+
+        /** 较长提示（如上传失败原因）；默认与 [showToast] 相同，实现类可改为较长显示时间。 */
+        default void showToastLong(String message) {
+            showToast(message);
+        }
         
         // 相机参数显示更新
         void updateIsoDisplay(int iso);
@@ -29,8 +37,10 @@ public interface CameraContract {
         /**
          * 预览中心 ROI 对应的亮度 L（cd/m²）；无效时为 NaN。
          * {@code centerMeanDn} 用于可选的色调映射（与测光 DN 一致）。
+         * {@code luminanceSourceTag}：与 {@link com.example.camera.presenter.CameraPresenter#computeLuminance(double)}
+         * 分支一致时为「查表」「标定」「先验」之一；无效 L 时为 {@code null}。
          */
-        void updateCenterLuminance(double lCdPerM2, double centerMeanDn);
+        void updateCenterLuminance(double lCdPerM2, double centerMeanDn, @Nullable String luminanceSourceTag);
         void onExposureRecommendationChanged(CameraModel.ExposureRecommendation recommendation);
         void requestAutoApplyRecommendation();
         void updateCalibrationStatus(String text);
@@ -40,6 +50,9 @@ public interface CameraContract {
 
         /** Debevec {@code g(DN)} 已从曝光序列写入本地后调用，用于刷新绝对亮度校准等 UI。 */
         void onDebevecGSaved();
+
+        /** Level1 查表云端上传成功/失败后，刷新「已上传」与重传按钮等 UI。 */
+        void onLevel1LookupUploadStateChanged();
 
         /** 已废弃：原 BV 指数曲线标定质量分支（应用已改为 Debevec + 灰卡标定）。 */
         void onCalibrationLowQualityComplete();

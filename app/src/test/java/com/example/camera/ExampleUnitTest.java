@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.util.Range;
 
+import androidx.annotation.Nullable;
+
 import com.example.camera.contract.CameraContract;
 import com.example.camera.model.CameraModel;
 import com.example.camera.presenter.CameraPresenter;
@@ -118,13 +120,15 @@ public class ExampleUnitTest {
         @Override public void updateExposureDisplay(String exposureText) { lastExposureText = exposureText; }
         @Override public void updateBrightnessMode(String mode) { lastBrightnessMode = mode; }
         @Override public void updateExposureValue(String exposureValue) { lastExposureValue = exposureValue; }
-        @Override public void updateCenterLuminance(double lCdPerM2, double centerMeanDn) {}
+        @Override public void updateCenterLuminance(double lCdPerM2, double centerMeanDn,
+                @Nullable String luminanceSourceTag) {}
         @Override public void onExposureRecommendationChanged(CameraModel.ExposureRecommendation recommendation) {}
         @Override public void requestAutoApplyRecommendation() {}
         @Override public void updateCalibrationStatus(String text) {}
         @Override public void updateCurveSource(String source) {}
         @Override public void updateCurveSourceBadge(String badgeText) {}
         @Override public void onDebevecGSaved() {}
+        @Override public void onLevel1LookupUploadStateChanged() {}
         @Override public void onCalibrationLowQualityComplete() {}
         @Override public void onCalibrationAbnormalComplete() {}
         @Override public void onCalibrationHighMediumComplete(String qualityTier) {}

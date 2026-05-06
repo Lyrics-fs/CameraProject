@@ -3,13 +3,9 @@ package com.example.camera.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import com.example.camera.calibration.model.CalibrationUploadData;
-import com.example.camera.calibration.model.CalibrationUploadPolicy;
-import com.example.camera.data.local.CalibrationRecordStore;
 import com.example.camera.model.calibration.CalibrationFactor;
-import com.example.camera.upload.UploadManager;
-
-import java.util.List;
+import com.example.camera.model.calibration.LookupTable;
+import com.example.camera.model.calibration.LookupTableRepository;
 
 public class CalibrationRepository {
     private static final String PREFS_NAME = "calibration_prefs";
@@ -41,16 +37,24 @@ public class CalibrationRepository {
     private static final String KEY_ABS_GREY_DN = "abs_calib_grey_dn";
     private static final String KEY_ABS_GREY_L = "abs_calib_grey_L";
     private static final String KEY_ABS_CALIB_TS = "abs_calib_timestamp";
+    /** {@link com.example.camera.model.calibration.CalibrationFactor#ABS_LEVEL_BRIGHTNESS_METER} 等 */
+    private static final String KEY_ABS_CALIB_LEVEL = "abs_calib_level";
+    /** 非空：Debevec 曲线来自启动时 HTTP 同步（如「云端用户曲线」）。本机重新标定 g/K 时会清除。 */
+    private static final String KEY_DEBEVEC_CLOUD_SOURCE = "debevec_cloud_source";
+    /** 本机曝光序列解算：R²_lnΔt（字符串 double），与当前本地 g 对应；云端拉取或无本地解算时应清除。 */
+    private static final String KEY_DEBEVEC_R2_LOG_DELTA_T = "debevec_r2_log_delta_t";
+    private static final String KEY_DEBEVEC_FRAME_COUNT = "debevec_frame_count";
+    private static final String KEY_DEBEVEC_SEQUENCE_ISO = "debevec_sequence_iso";
 
     private final SharedPreferences sharedPreferences;
-    private final CalibrationRecordStore calibrationRecordStore;
     private final Context appContext;
+    private final LookupTableRepository lookupTableRepository;
 
     public CalibrationRepository(Context context) {
         Context app = context.getApplicationContext();
         this.appContext = app;
         sharedPreferences = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        calibrationRecordStore = new CalibrationRecordStore(app);
+        lookupTableRepository = new LookupTableRepository(app);
     }
 
     /** 清除历史 APEX/BV 指数曲线在 SharedPreferences 中的键（应用已不再读取）。 */
@@ -118,61 +122,10 @@ public class CalibrationRepository {
     }
 
     // -------------------------------------------------------------------------
-    // 本地标定上传记录（Room，无个人身份信息）
+    // Debevec g(Z) + 绝对亮度标定（灰卡 + 亮度计或传感器 L3 估算）
     // -------------------------------------------------------------------------
 
-    /** 保存一条标定快照；LOW 质量会记为不参与上传的状态。 */
-    public void saveCalibrationRecord(CalibrationUploadData record) {
-        if (record == null) {
-            return;
-        }
-        calibrationRecordStore.saveCalibrationRecord(record);
-        if (CalibrationUploadPolicy.INSTANCE.shouldUpload(record.getQuality())) {
-            UploadManager.scheduleAutoUpload(appContext);
-        }
-    }
-
-    /** 待上传：质量为 HIGH/MEDIUM 且仍处于 pending 的记录。 */
-    public List<CalibrationUploadData> getPendingUploads() {
-        return calibrationRecordStore.getPendingUploads();
-    }
-
-    /** 待上传条数（HIGH/MEDIUM 且 PENDING）。 */
-    public int getPendingUploadCount() {
-        return calibrationRecordStore.countPendingUploads();
-    }
-
-    /** 标记指定记录已成功上传（写入上传完成时间，供 30 天保留策略使用）。 */
-    public void markAsUploaded(String uploadId) {
-        if (uploadId == null || uploadId.isEmpty()) {
-            return;
-        }
-        calibrationRecordStore.markAsUploaded(uploadId);
-    }
-
-    /** 已成功上传的历史记录（按上传完成时间倒序）。 */
-    public List<CalibrationUploadData> getUploadHistory() {
-        return calibrationRecordStore.getUploadHistory();
-    }
-
-    /** 当前仍处于失败状态、可重试或未过放弃期的记录。 */
-    public List<CalibrationUploadData> getFailedUploads() {
-        return calibrationRecordStore.getFailedUploads();
-    }
-
-    /** 某次上传失败时调用，用于 7 天放弃策略计时。 */
-    public void markUploadFailed(String uploadId) {
-        if (uploadId == null || uploadId.isEmpty()) {
-            return;
-        }
-        calibrationRecordStore.markUploadFailed(uploadId);
-    }
-
-    // -------------------------------------------------------------------------
-    // Debevec g(Z) + 绝对亮度标定（灰卡 + 亮度计）
-    // -------------------------------------------------------------------------
-
-    /** 持久化 Debevec 离散响应曲线 {@code g[0..255]}。 */
+    /** 持久化 Debevec 离散响应曲线 {@code g[0..255]}（本机写入；清除云端曲线来源标记）。 */
     public void saveDebevecG(double[] g) {
         if (g == null || g.length < 256) {
             return;
@@ -184,7 +137,46 @@ public class CalibrationRepository {
             }
             sb.append(Double.toString(g[i]));
         }
-        sharedPreferences.edit().putString(KEY_DEBEVEC_G, sb.toString()).apply();
+        sharedPreferences.edit()
+                .remove(KEY_DEBEVEC_CLOUD_SOURCE)
+                .remove(KEY_DEBEVEC_R2_LOG_DELTA_T)
+                .remove(KEY_DEBEVEC_FRAME_COUNT)
+                .remove(KEY_DEBEVEC_SEQUENCE_ISO)
+                .putString(KEY_DEBEVEC_G, sb.toString())
+                .apply();
+    }
+
+    /**
+     * 与本机 {@link #saveDebevecG(double[])} 配套的解算质量与序列参数（供 Level2 云端上报判断）。
+     * 应在成功写入 g 之后调用。
+     */
+    public void saveDebevecSolveMetadata(double rSquaredLogDeltaT, int frameCount, int iso) {
+        SharedPreferences.Editor ed = sharedPreferences.edit()
+                .putString(KEY_DEBEVEC_R2_LOG_DELTA_T, Double.toString(rSquaredLogDeltaT))
+                .putInt(KEY_DEBEVEC_FRAME_COUNT, Math.max(0, frameCount))
+                .putInt(KEY_DEBEVEC_SEQUENCE_ISO, Math.max(1, iso));
+        ed.apply();
+    }
+
+    /** 无或未写入时返回 NaN。 */
+    public double getDebevecRSquaredLogDeltaTForUpload() {
+        String s = sharedPreferences.getString(KEY_DEBEVEC_R2_LOG_DELTA_T, null);
+        if (s == null || s.isEmpty()) {
+            return Double.NaN;
+        }
+        try {
+            return Double.parseDouble(s);
+        } catch (NumberFormatException e) {
+            return Double.NaN;
+        }
+    }
+
+    public int getDebevecFrameCountForUpload() {
+        return sharedPreferences.getInt(KEY_DEBEVEC_FRAME_COUNT, 0);
+    }
+
+    public int getDebevecSequenceIsoForUpload() {
+        return sharedPreferences.getInt(KEY_DEBEVEC_SEQUENCE_ISO, 100);
     }
 
     /** @return {@code g} 长度 256，若未保存则 {@code null} */
@@ -213,16 +205,27 @@ public class CalibrationRepository {
         return g != null && g.length >= 256;
     }
 
+    /**
+     * 持久化 K；{@link CalibrationFactor#ABS_LEVEL_SENSOR_LUX_ESTIMATE} 为本地 L3，
+     * 不应作为高精度云端曲线提交（当前上传管线亦不依赖本字段，仅作区分展示）。
+     */
     public void saveCalibrationFactor(CalibrationFactor factor) {
         if (factor == null || !factor.isValid()) {
             return;
         }
-        sharedPreferences.edit()
+        SharedPreferences.Editor ed = sharedPreferences.edit()
                 .putLong(KEY_ABS_CALIB_K, Double.doubleToLongBits(factor.k))
                 .putLong(KEY_ABS_GREY_DN, Double.doubleToLongBits(factor.greyCardPixelValue))
                 .putLong(KEY_ABS_GREY_L, Double.doubleToLongBits(factor.greyCardLuminance))
-                .putLong(KEY_ABS_CALIB_TS, factor.calibrationTimestamp)
-                .apply();
+                .putLong(KEY_ABS_CALIB_TS, factor.calibrationTimestamp);
+        // Level2（亮度计）：不写入 level 键，与引入 L3 前的 prefs 形态一致；仅 L3 写入标记。
+        if (factor.isSensorLuxEstimate()) {
+            ed.putInt(KEY_ABS_CALIB_LEVEL, CalibrationFactor.ABS_LEVEL_SENSOR_LUX_ESTIMATE);
+        } else {
+            ed.remove(KEY_ABS_CALIB_LEVEL);
+        }
+        ed.remove(KEY_DEBEVEC_CLOUD_SOURCE);
+        ed.apply();
     }
 
     public CalibrationFactor loadCalibrationFactor() {
@@ -234,7 +237,13 @@ public class CalibrationRepository {
         double greyDn = Double.longBitsToDouble(sharedPreferences.getLong(KEY_ABS_GREY_DN, 0L));
         double greyL = Double.longBitsToDouble(sharedPreferences.getLong(KEY_ABS_GREY_L, 0L));
         long ts = sharedPreferences.getLong(KEY_ABS_CALIB_TS, 0L);
-        CalibrationFactor f = new CalibrationFactor(k, greyDn, greyL, ts);
+        int level = CalibrationFactor.ABS_LEVEL_BRIGHTNESS_METER;
+        if (sharedPreferences.contains(KEY_ABS_CALIB_LEVEL)
+                && sharedPreferences.getInt(KEY_ABS_CALIB_LEVEL, CalibrationFactor.ABS_LEVEL_BRIGHTNESS_METER)
+                == CalibrationFactor.ABS_LEVEL_SENSOR_LUX_ESTIMATE) {
+            level = CalibrationFactor.ABS_LEVEL_SENSOR_LUX_ESTIMATE;
+        }
+        CalibrationFactor f = new CalibrationFactor(k, greyDn, greyL, ts, level);
         return f.isValid() ? f : null;
     }
 
@@ -243,16 +252,95 @@ public class CalibrationRepository {
         return hasDebevecG() && loadCalibrationFactor() != null;
     }
 
+    /** Level 1：是否已有可用的实验室 DN→L 查表（与 {@link LookupTableRepository} 同源持久化）。 */
+    public boolean hasLookupTable() {
+        return lookupTableRepository != null && lookupTableRepository.isAvailable();
+    }
+
+    /**
+     * Level 1：查表条目数量摘要。
+     * 无持久化仓库时返回空串；尚未保存查表时返回「无查表」。
+     */
+    public String getLookupTableInfo() {
+        if (lookupTableRepository == null) {
+            return "";
+        }
+        LookupTable table = lookupTableRepository.load();
+        if (table == null) {
+            return "无查表";
+        }
+        return table.getEntries().size() + " 组";
+    }
+
     /** 清除绝对标定系数（保留或同时清除 g 由参数决定）。 */
     public void clearAbsoluteCalibration(boolean alsoClearDebevecG) {
         SharedPreferences.Editor ed = sharedPreferences.edit()
                 .remove(KEY_ABS_CALIB_K)
                 .remove(KEY_ABS_GREY_DN)
                 .remove(KEY_ABS_GREY_L)
-                .remove(KEY_ABS_CALIB_TS);
+                .remove(KEY_ABS_CALIB_TS)
+                .remove(KEY_ABS_CALIB_LEVEL);
         if (alsoClearDebevecG) {
-            ed.remove(KEY_DEBEVEC_G);
+            ed.remove(KEY_DEBEVEC_G)
+                    .remove(KEY_DEBEVEC_R2_LOG_DELTA_T)
+                    .remove(KEY_DEBEVEC_FRAME_COUNT)
+                    .remove(KEY_DEBEVEC_SEQUENCE_ISO);
         }
+        ed.remove(KEY_DEBEVEC_CLOUD_SOURCE);
         ed.apply();
+    }
+
+    /** 写入 Level1 查表（与 {@link LookupTableRepository#save} 同源）。 */
+    public void persistLookupTable(LookupTable table) {
+        if (lookupTableRepository == null || table == null) {
+            return;
+        }
+        lookupTableRepository.save(table);
+    }
+
+    /**
+     * 启动时云端同步：写入 Debevec {@code g}，可选绝对标定系数，并标记 {@link #KEY_DEBEVEC_CLOUD_SOURCE}。
+     */
+    public void applyCloudDebevecSnapshot(double[] g, CalibrationFactor factorOrNull, String cloudSourceLabel) {
+        if (g == null || g.length < 256) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 256; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(Double.toString(g[i]));
+        }
+        SharedPreferences.Editor ed = sharedPreferences.edit().putString(KEY_DEBEVEC_G, sb.toString());
+        if (factorOrNull != null && factorOrNull.isValid()) {
+            ed.putLong(KEY_ABS_CALIB_K, Double.doubleToLongBits(factorOrNull.k))
+                    .putLong(KEY_ABS_GREY_DN, Double.doubleToLongBits(factorOrNull.greyCardPixelValue))
+                    .putLong(KEY_ABS_GREY_L, Double.doubleToLongBits(factorOrNull.greyCardLuminance))
+                    .putLong(KEY_ABS_CALIB_TS, factorOrNull.calibrationTimestamp);
+            if (factorOrNull.isSensorLuxEstimate()) {
+                ed.putInt(KEY_ABS_CALIB_LEVEL, CalibrationFactor.ABS_LEVEL_SENSOR_LUX_ESTIMATE);
+            } else {
+                ed.remove(KEY_ABS_CALIB_LEVEL);
+            }
+        } else {
+            ed.remove(KEY_ABS_CALIB_K)
+                    .remove(KEY_ABS_GREY_DN)
+                    .remove(KEY_ABS_GREY_L)
+                    .remove(KEY_ABS_CALIB_TS)
+                    .remove(KEY_ABS_CALIB_LEVEL);
+        }
+        if (cloudSourceLabel != null && !cloudSourceLabel.isEmpty()) {
+            ed.putString(KEY_DEBEVEC_CLOUD_SOURCE, cloudSourceLabel);
+        }
+        ed.remove(KEY_DEBEVEC_R2_LOG_DELTA_T)
+                .remove(KEY_DEBEVEC_FRAME_COUNT)
+                .remove(KEY_DEBEVEC_SEQUENCE_ISO);
+        ed.apply();
+    }
+
+    /** 非空表示 Debevec 数据来自云端 HTTP 同步的展示标记。 */
+    public String getDebevecCloudSourceLabel() {
+        return sharedPreferences.getString(KEY_DEBEVEC_CLOUD_SOURCE, "");
     }
 }
