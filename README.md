@@ -91,7 +91,7 @@ CameraProject 为河海大学大创相关工程，面向移动端 **相机响应
 - `com.example.camera.network.CloudRepository`：**Kotlin** `object`；`BASE_URL` = `BuildConfig.CALIBRATION_API_BASE_URL`；`uploadLookupTableBlocking`、`uploadCurve`。
 - `com.example.camera.network.ApiService` / `CalibrationApiService`：FC 路径声明。
 - `com.example.camera.network.UploadTableResponseResolver`、`RetrofitResponses`：`/upload-table` JSON 解析与响应关闭。
-- `com.example.camera.upload.LookupTableUploadScheduler`、`UploadLookupTableWorker`：查表上传队列（UNMETERED + 退避）。
+- `com.example.camera.upload.LookupTableUploadScheduler`、`UploadLookupTableWorker`：查表上传队列（CONNECTED，含移动网络 + 退避）。
 - `com.example.camera.model.calibration.DebevecSolver`、`MatrixBuilder`、`SvdSolver`：g(DN) 求解。
 - `com.example.camera.model.calibration.AbsoluteLuminanceCalibration`：由灰卡与已知 cd/m² 求 **K**。
 - `com.example.camera.presenter.ExposureSequenceCapture`：固定 ISO、变快门连拍供 Debevec。
@@ -114,7 +114,7 @@ CameraProject 为河海大学大创相关工程，面向移动端 **相机响应
 - **`LAB_UPLOAD_SECRET`**：与 FC **`LAB_SECRET`** / `app.py` 校验一致；由 `readLabUploadSecretForBuildConfig` 读入并写入 **`BuildConfig.LAB_UPLOAD_SECRET`**。  
   **注意**：Gradle **只读取名为 `local.properties` 的文件**，`local.properties.txt` 等扩展名 **无效**。
 
-未配置 Supabase / 密钥时仍可本地编译运行拍照与标定；查表上传在无密钥或仅蜂窝网下可能跳过或排队失败；**`CloudCalibrationSync`** 仍可在有网时尝试 **`query`**。
+未配置 Supabase / 密钥时仍可本地编译运行拍照与标定；查表上传在无密钥时会跳过；**`CloudCalibrationSync`** 仍可在有网时尝试 **`query`**。
 
 ### 实验室上传密钥（Level 1 `upload-table` / 云函数 `LAB_SECRET`）
 
@@ -133,7 +133,7 @@ CameraProject 为河海大学大创相关工程，面向移动端 **相机响应
 
 - **上传门槛**：持久化查表需 **至少 5 组** `(dn, luminance)` 才会入队并成功走 `/upload-table`；不足 5 组时 Worker / `CloudRepository` 会 **跳过上传**（不视为网络错误）。本地用于测光/显示的「查表是否可用」另按 **`LookupTable.isAvailable()`（≥3 组）`** 判断，与上传门槛 **不同**。
 - **密钥**：`LAB_UPLOAD_SECRET` 必须与 FC 环境变量 **`LAB_SECRET`** 一致，否则 HTTP/JSON 会返回 403 等业务失败。
-- **失败不影响本机标定**：上传失败、未配置密钥、仅蜂窝网络（不满足 **UNMETERED** 队列约束）或用户从未触发上传时，**已保存的查表仍保留在本地**，测光与界面逻辑照常使用已持久化数据；云端仅用于备份/聚合/多端拉取（`CloudCalibrationSync` 等）。
+- **失败不影响本机标定**：上传失败、未配置密钥或用户从未触发上传时，**已保存的查表仍保留在本地**，测光与界面逻辑照常使用已持久化数据；云端仅用于备份/聚合/多端拉取（`CloudCalibrationSync` 等）。
 
 **远端下发**：若需正式渠道动态密钥，可在应用内增加一次「拉取上传令牌」接口，将令牌写入 `EncryptedSharedPreferences` 再参与请求；当前仓库仅实现 **构建期注入**，便于实验室内测包与 CI 对齐云函数。
 
@@ -167,7 +167,7 @@ CameraProject 为河海大学大创相关工程，面向移动端 **相机响应
 
 **Level 1 查表上传入队（WorkManager）**
 
-- 保存查表或「再次上传」后由 **`LookupTableUploadScheduler`** 入队 **`UploadLookupTableWorker`**：约束为 **`NetworkType.UNMETERED`**（通常为 Wi‑Fi），**指数退避**重试；实际 HTTP 由 **`CloudRepository.uploadLookupTableBlocking`** 执行。
+- 保存查表或「再次上传」后由 **`LookupTableUploadScheduler`** 入队 **`UploadLookupTableWorker`**：约束为 **`NetworkType.CONNECTED`**（有网络即可，含移动网络），**指数退避**重试；实际 HTTP 由 **`CloudRepository.uploadLookupTableBlocking`** 执行。
 - 成功后在 Worker 内 **`markAsUploaded()`**；`MainActivity` 观察 **`UNIQUE_WORK_NAME`** 的 `WorkInfo`，再 Toast 与刷新「已上传」UI。
 
 ### Room `calibration_records` 与当前上传的关系
@@ -186,7 +186,7 @@ CameraProject 为河海大学大创相关工程，面向移动端 **相机响应
 | 方向 | 触发 / 入口 | 接口或机制 |
 |------|-------------|------------|
 | **下行** | `CameraApplication` 启动 IO 协程 | **`GET query`**（`CloudCalibrationSync`）解析并写入查表 / Debevec；**`ping`** 健康探测 |
-| **上行 · Level1** | 保存查表或「再次上传」 | **`POST upload-table`**，`secret` = `BuildConfig.LAB_UPLOAD_SECRET`；**WorkManager**（UNMETERED） |
+| **上行 · Level1** | 保存查表或「再次上传」 | **`POST upload-table`**，`secret` = `BuildConfig.LAB_UPLOAD_SECRET`；**WorkManager**（CONNECTED，含移动网络） |
 | **上行 · Level2** | 亮度计灰卡标定成功且帧数、R² 达标 | **`POST upload-curve`**（同步调用，非 WorkManager）；**L3 传感器路径不上传** |
 
 主界面与设置页含 **L3 精度说明**、**匿名上传说明**（亮度计路径）、**Debevec 连拍须保持手机不动**、**灰卡仅圈本体** 等文案（`strings.xml` / `MainActivity`）。

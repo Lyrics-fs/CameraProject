@@ -10,10 +10,10 @@ import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.camera.BuildConfig;
@@ -164,7 +164,7 @@ public class SensorCalibrationActivity extends AppCompatActivity {
     private void onApplyRecommended() {
         SensorCalibrationStore.PendingRecommendation p = store.readPendingRecommendation();
         if (p == null) {
-            Toast.makeText(this, R.string.sensor_cal_toast_no_pending, Toast.LENGTH_LONG).show();
+            showDialogMessage(R.string.sensor_cal_toast_no_pending);
             return;
         }
         if (p.linear) {
@@ -187,14 +187,14 @@ public class SensorCalibrationActivity extends AppCompatActivity {
             }
         }
         updateModePanels();
-        Toast.makeText(this, R.string.sensor_cal_toast_applied_pending, Toast.LENGTH_SHORT).show();
+        showDialogMessage(R.string.sensor_cal_toast_applied_pending);
     }
 
     private void onRestoreDefault() {
         store.clearToDefault();
         loadFromStore();
         refreshStatusTexts();
-        Toast.makeText(this, R.string.sensor_cal_toast_cleared, Toast.LENGTH_SHORT).show();
+        showDialogMessage(R.string.sensor_cal_toast_cleared);
     }
 
     private void onSave() {
@@ -209,26 +209,38 @@ public class SensorCalibrationActivity extends AppCompatActivity {
             } else if (id == R.id.radio_cal_piecewise) {
                 List<SensorCalibrationStore.LuxSegment> segs = collectSegmentsFromUi();
                 if (segs.isEmpty()) {
-                    Toast.makeText(this, R.string.sensor_cal_error_piecewise_need_segment, Toast.LENGTH_SHORT).show();
+                    showDialogMessage(R.string.sensor_cal_error_piecewise_need_segment);
                     return;
                 }
                 for (SensorCalibrationStore.LuxSegment s : segs) {
                     if (s.minLux > s.maxLux) {
-                        Toast.makeText(this, R.string.sensor_cal_error_piecewise_order, Toast.LENGTH_SHORT).show();
+                        showDialogMessage(R.string.sensor_cal_error_piecewise_order);
                         return;
                     }
                 }
                 store.savePiecewise(segs);
             }
         } catch (NumberFormatException e) {
-            Toast.makeText(this, R.string.sensor_cal_error_parse_number, Toast.LENGTH_SHORT).show();
+            showDialogMessage(R.string.sensor_cal_error_parse_number);
             return;
         } catch (JSONException e) {
-            Toast.makeText(this, R.string.sensor_cal_error_parse_number, Toast.LENGTH_SHORT).show();
+            showDialogMessage(R.string.sensor_cal_error_parse_number);
             return;
         }
         refreshStatusTexts();
-        Toast.makeText(this, R.string.sensor_cal_toast_saved, Toast.LENGTH_SHORT).show();
+        showDialogMessage(R.string.sensor_cal_toast_saved);
+    }
+
+    private void showDialogMessage(int messageRes) {
+        showDialogMessage(getString(messageRes));
+    }
+
+    private void showDialogMessage(@NonNull String message) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.sensor_calibration_title)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
     }
 
     private static double parseDoubleOrThrow(@NonNull String s) throws NumberFormatException {

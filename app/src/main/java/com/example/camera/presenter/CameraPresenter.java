@@ -84,6 +84,8 @@ public class CameraPresenter implements CameraContract.Presenter {
     private volatile double latestMeanY = Double.NaN;
     /** 最近一次成功保存 Debevec g 时的简短诊断（供界面结果区展示）。 */
     private volatile String lastDebevecDiagnosticsSummary = "";
+    /** 主界面可见：最近一次 Level2 曲线上传结果（成功/失败 + HTTP code）。 */
+    private volatile String lastLevel2CurveUploadStatusLine = "";
     /**
      * 最近一次曝光序列后台解算的失败原因（成功时清空）。
      * 用于解释「已拍过序列但 hasDebevecG 仍为 false」——通常是解算抛错或未写入。
@@ -1170,7 +1172,9 @@ public class CameraPresenter implements CameraContract.Presenter {
             try {
                 if (frames == null || frames.size() < 4) {
                     lastDebevecSolveFailureHint = "有效帧少于 4 张，未解算也未保存 g";
-                    view.showToastLong("有效帧过少（至少 4 张），无法解算 g(DN)，曲线未保存");
+                    String msg = "有效帧过少（至少 4 张），无法解算 g(DN)，曲线未保存";
+                    view.showToastLong(msg);
+                    view.onDebevecSolveFailed(msg);
                     return;
                 }
                 ArrayList<ExposureSequenceCapture.CapturedFrame> sorted =
@@ -1183,7 +1187,9 @@ public class CameraPresenter implements CameraContract.Presenter {
                 for (ExposureSequenceCapture.CapturedFrame f : sorted) {
                     if (f.getWidth() != w0 || f.getHeight() != h0) {
                         lastDebevecSolveFailureHint = "各帧分辨率不一致，已放弃解算";
-                        view.showToastLong("各帧分辨率不一致，已放弃解算，曲线未保存");
+                        String msg = "各帧分辨率不一致，已放弃解算，曲线未保存";
+                        view.showToastLong(msg);
+                        view.onDebevecSolveFailed(msg);
                         return;
                     }
                     images.add(f.getPixels());
@@ -1199,7 +1205,9 @@ public class CameraPresenter implements CameraContract.Presenter {
                 double[] gOut = result.getG();
                 if (gOut == null || gOut.length < 256) {
                     lastDebevecSolveFailureHint = "解算返回的 g 长度异常（<256），未写入本机";
-                    view.showToastLong("Debevec 解算结果异常，g 未保存，请重拍曝光序列");
+                    String msg = "Debevec 解算结果异常，g 未保存，请重拍曝光序列";
+                    view.showToastLong(msg);
+                    view.onDebevecSolveFailed(msg);
                     return;
                 }
                 CalibrationRepository repoW = getCalibrationRepository();
@@ -1208,6 +1216,7 @@ public class CameraPresenter implements CameraContract.Presenter {
                             ? "标定仓库未初始化，g 未保存"
                             : "g 写入本机失败，请检查存储空间与系统限制后重拍序列";
                     view.showToastLong(lastDebevecSolveFailureHint);
+                    view.onDebevecSolveFailed(lastDebevecSolveFailureHint);
                     return;
                 }
                 lastDebevecSolveFailureHint = "";
@@ -1230,6 +1239,7 @@ public class CameraPresenter implements CameraContract.Presenter {
                 String hint = msg != null ? msg : "Debevec 解算失败";
                 lastDebevecSolveFailureHint = hint;
                 view.showToastLong(hint + "（曲线未保存）");
+                view.onDebevecSolveFailed(hint);
             }
         });
     }
@@ -1238,6 +1248,40 @@ public class CameraPresenter implements CameraContract.Presenter {
     public String getLastDebevecSolveFailureHint() {
         String s = lastDebevecSolveFailureHint;
         return s != null ? s : "";
+    }
+
+    /**
+     * 与 {@link #scheduleLevel2CurveUploadIfEligibleAfterMeterCalibration} 使用相同门槛，
+     * 供亮度计灰卡标定成功后展示 R²_lnΔt、序列张数及是否达到云端上报条件。
+     */
+    public String buildLevel2CurveUploadEligibilitySummaryForMeterPath() {
+        if (appContext == null) {
+            return "";
+        }
+        CalibrationRepository repo = getCalibrationRepository();
+        if (repo == null || !repo.hasDebevecG()) {
+            return "";
+        }
+        int frames = repo.getDebevecFrameCountForUpload();
+        double r2 = repo.getDebevecRSquaredLogDeltaTForUpload();
+        String r2Display = Double.isFinite(r2)
+                ? String.format(Locale.US, "%.3f", r2)
+                : "—";
+        boolean r2Ok = Double.isFinite(r2) && r2 >= MIN_DEBEVEC_R2_FOR_CLOUD_UPLOAD;
+        boolean framesOk = frames >= MIN_DEBEVEC_FRAMES_FOR_CLOUD_UPLOAD;
+        boolean eligible = r2Ok && framesOk;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(appContext.getString(R.string.level2_cloud_upload_gate_title)).append('\n');
+        if (!Double.isFinite(r2)) {
+            sb.append(appContext.getString(R.string.level2_cloud_upload_gate_r2_missing)).append('\n');
+        }
+        sb.append(appContext.getString(R.string.level2_cloud_upload_gate_metrics, r2Display, frames))
+                .append('\n');
+        sb.append(eligible
+                ? appContext.getString(R.string.level2_cloud_upload_gate_ok)
+                : appContext.getString(R.string.level2_cloud_upload_gate_no));
+        return sb.toString();
     }
 
     /**
@@ -1276,7 +1320,7 @@ public class CameraPresenter implements CameraContract.Presenter {
                 dnMin = dnMax;
                 dnMax = t;
             }
-            boolean ok = CloudRepository.uploadCurve(
+            CloudRepository.CurveUploadResult result = CloudRepository.uploadCurveDetailed(
                     appContext,
                     Build.MODEL,
                     g,
@@ -1288,16 +1332,45 @@ public class CameraPresenter implements CameraContract.Presenter {
                     sampleCount,
                     iso,
                     BuildConfig.VERSION_NAME);
-            if (!ok) {
-                new Handler(Looper.getMainLooper()).post(
-                        () -> view.showToast(
-                                appContext.getString(R.string.level2_curve_upload_local_only)));
+            long now = System.currentTimeMillis();
+            String time = String.format(Locale.CHINA, "%tF %tT", now, now);
+            if (result.getSuccess()) {
+                lastLevel2CurveUploadStatusLine = String.format(
+                        Locale.CHINA,
+                        "Level2 云端上传: 成功 (HTTP %d，%s)",
+                        result.getHttpCode(),
+                        time);
+            } else {
+                String detailRaw = result.getDetail();
+                String detail = detailRaw != null && !detailRaw.isEmpty()
+                        ? ("，" + detailRaw)
+                        : "";
+                if (detail.length() > 140) {
+                    detail = detail.substring(0, 140) + "…";
+                }
+                lastLevel2CurveUploadStatusLine = String.format(
+                        Locale.CHINA,
+                        "Level2 云端上传: 失败 (HTTP %d，%s%s)",
+                        result.getHttpCode(),
+                        time,
+                        detail);
             }
+            new Handler(Looper.getMainLooper()).post(() -> {
+                view.onLevel2CurveUploadStateChanged();
+                if (!result.getSuccess()) {
+                    view.showToast(appContext.getString(R.string.level2_curve_upload_local_only));
+                }
+            });
         });
     }
 
     public String getLastDebevecDiagnosticsSummary() {
         String s = lastDebevecDiagnosticsSummary;
+        return s != null ? s : "";
+    }
+
+    public String getLastLevel2CurveUploadStatusLine() {
+        String s = lastLevel2CurveUploadStatusLine;
         return s != null ? s : "";
     }
 

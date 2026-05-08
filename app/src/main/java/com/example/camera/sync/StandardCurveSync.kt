@@ -3,10 +3,6 @@ package com.example.camera.sync
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.widget.Toast
-import com.example.camera.R
 import com.example.camera.data.CalibrationRepository
 import com.example.camera.supabase.SupabaseCalibrationRemote
 import com.example.camera.supabase.SupabaseProvider
@@ -64,13 +60,7 @@ object StandardCurveSync {
             return
         }
         repo.setFirstLaunchCloudHintShown()
-        Handler(Looper.getMainLooper()).post {
-            Toast.makeText(
-                app,
-                R.string.curve_sync_no_cloud_use_prior,
-                Toast.LENGTH_LONG,
-            ).show()
-        }
+        // 不再使用 Toast：提示在主界面状态区展示，避免后台弹出截断或打断体验。
     }
 
     private fun sendUpdateBroadcast(app: Context) {

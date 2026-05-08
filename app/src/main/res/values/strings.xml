@@ -40,7 +40,7 @@
     <string name="level1_clear_samples_confirm">确定清空当前 %d 组数据？（尚未保存的采样将丢弃）</string>
     <string name="level1_lookup_saved_local">查表已保存在本机</string>
     <string name="level1_lookup_upload_success">Level 1 查表已同步至云端</string>
-    <string name="level1_lookup_upload_queued_wifi">查表云端上传已排队：连接 Wi‑Fi（非计费网络）后将自动重试；成功或失败会有提示。</string>
+    <string name="level1_lookup_upload_queued_wifi">查表云端上传已排队：网络可用时（含移动网络）将自动重试；成功或失败会有提示。</string>
     <string name="level1_lookup_upload_fail">查表已保存在本机。Level 1 云端上传失败：%1$s</string>
     <string name="level1_lookup_cloud_status_uploaded">● Level 1 云端：查表已上传</string>
     <string name="level1_lookup_cloud_status_pending">● Level 1 云端：查表尚未上传或待重试</string>
@@ -70,7 +70,7 @@
     <string name="settings_restore_curve_done">已清除旧版曲线数据</string>
 
     <string name="settings_title">设置</string>
-    <string name="settings_cloud_upload_hint">Level 1 查表与 Level 2 Debevec 曲线上传在主界面标定区完成（需 LAB_UPLOAD_SECRET、非计费网络等，详见 README）。本页已移除旧版「数据分享」与基于 Room 的上传队列。</string>
+    <string name="settings_cloud_upload_hint">Level 1 查表与 Level 2 Debevec 曲线上传在主界面标定区完成（需 LAB_UPLOAD_SECRET 与可用网络，详见 README）。本页已移除旧版「数据分享」与基于 Room 的上传队列。</string>
     <string name="settings_calibration_upload_privacy">隐私说明：使用亮度计完成绝对标定且 Debevec 达标时，曲线数据可能在后台自动上传至实验室服务。上传内容仅为匿名标定参数（如机型、g、K、R²、帧数、应用版本等），不含姓名、照片、IMEI、精确位置等可识别个人的信息。</string>
     <string name="calibration_upload_privacy_notice">上传内容仅为匿名标定参数，不含个人身份信息。</string>
     <string name="abs_l3_precision_notice">当前为传感器估算路径：结果为参考值，精度低于亮度计标定（Level 2 亮度计）。</string>
@@ -78,11 +78,17 @@
     <string name="abs_calibration_result_meter_line">K = %1$.4f（灰卡 %2$.1f cd/m²）</string>
     <string name="abs_l3_calibrate_done_toast">本地 L3 标定完成，K = %1$.4f（估算 L ≈ %2$.1f cd/m²，灰卡 DN ≈ %3$.1f）</string>
     <string name="level2_meter_calibrate_done_toast">绝对亮度标定完成（亮度计），K = %1$.4f（灰卡处 DN ≈ %2$.1f）</string>
+    <string name="level2_cloud_upload_gate_title">【Debevec 曲线上传实验室】</string>
+    <string name="level2_cloud_upload_gate_metrics">· R²_lnΔt = %1$s（要求 ≥ 0.850）\n· 有效曝光序列帧数 = %2$d（要求 ≥ 8）</string>
+    <string name="level2_cloud_upload_gate_r2_missing">· R²_lnΔt 暂无记录（需重新完成曝光序列并成功保存 g 后才有此项）。</string>
+    <string name="level2_cloud_upload_gate_ok">· 结论：已满足上报条件。将在后台尝试上传（需联网与实验室接口可用；失败时仅保留本机数据）。</string>
+    <string name="level2_cloud_upload_gate_no">· 结论：未满足上报条件，曲线仅保存在本机、不会触发上传。可重拍更长跨度、更稳定的曝光序列以提高 R² 或增加张数。</string>
     <string name="debevec_sequence_dialog_title">Debevec 曝光序列</string>
     <string name="debevec_sequence_dialog_message">将固定 ISO=%1$d，连拍 %2$d 张不同快门（约 1EV 间隔）。\n\n拍摄全程请使用三脚架或稳定支撑，保持手机与场景完全静止，不要触碰或移动机身。\n\n请务必保持手机完全不动，否则会影响 g(DN) 标定质量。</string>
     <string name="debevec_sequence_dialog_start">开始</string>
     <string name="debevec_sequence_dialog_cancel">取消</string>
     <string name="debevec_sequence_capture_toast">正在连拍，请保持手机完全不动…</string>
+    <string name="debevec_solving_in_progress">正在后台解算并保存 g(DN)…请稍候</string>
     <string name="calibration_light_sensor_no_feature">系统未声明环境光传感器，无法进行真实亮度标定</string>
     <string name="calibration_light_sensor_no_hardware">未检测到可用的环境光传感器（可能被厂商裁剪或当前为模拟器），无法进行真实亮度标定</string>
 

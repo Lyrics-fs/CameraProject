@@ -50,6 +50,8 @@ public interface CameraContract {
 
         /** Debevec {@code g(DN)} 已从曝光序列写入本地后调用，用于刷新绝对亮度校准等 UI。 */
         void onDebevecGSaved();
+        /** Debevec 序列后台解算失败（或写入失败）后调用，用于结束“解算中”状态并提示失败原因。 */
+        void onDebevecSolveFailed(String message);
 
         /**
          * ImageAnalysis 已更新与灰卡标定共用的 Y 平面快照；实现类应在主线程刷新
@@ -59,6 +61,8 @@ public interface CameraContract {
 
         /** Level1 查表云端上传成功/失败后，刷新「已上传」与重传按钮等 UI。 */
         void onLevel1LookupUploadStateChanged();
+        /** Level2 Debevec 曲线上传完成后，刷新主界面可见状态（含 HTTP code）。 */
+        void onLevel2CurveUploadStateChanged();
 
         /** 已废弃：原 BV 指数曲线标定质量分支（应用已改为 Debevec + 灰卡标定）。 */
         void onCalibrationLowQualityComplete();

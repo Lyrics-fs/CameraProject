@@ -4,7 +4,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
-import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import com.example.camera.data.CalibrationRepository
@@ -40,7 +40,11 @@ class SettingsActivity : AppCompatActivity() {
             sendBroadcast(
                 Intent(StandardCurveSync.ACTION_CURVE_PROFILE_UPDATED).setPackage(packageName),
             )
-            Toast.makeText(this, R.string.settings_restore_curve_done, Toast.LENGTH_SHORT).show()
+            AlertDialog.Builder(this)
+                .setTitle(R.string.settings_title)
+                .setMessage(R.string.settings_restore_curve_done)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
         }
     }
 }

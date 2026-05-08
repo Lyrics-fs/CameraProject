@@ -7,7 +7,6 @@ import android.text.InputType;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -109,7 +108,7 @@ public class CalibrationVerificationActivity extends AppCompatActivity {
 
         if (!lightSensorManager.hasLightSensor()) {
             btnStart.setEnabled(false);
-            Toast.makeText(this, R.string.cal_verify_no_sensor, Toast.LENGTH_LONG).show();
+            showDialogMessage(getString(R.string.cal_verify_no_sensor));
         }
 
         updateUi();
@@ -134,7 +133,7 @@ public class CalibrationVerificationActivity extends AppCompatActivity {
 
     private void onStartVerification() {
         if (!lightSensorManager.hasLightSensor()) {
-            Toast.makeText(this, R.string.cal_verify_no_sensor, Toast.LENGTH_SHORT).show();
+            showDialogMessage(getString(R.string.cal_verify_no_sensor));
             return;
         }
         samples.clear();
@@ -149,7 +148,7 @@ public class CalibrationVerificationActivity extends AppCompatActivity {
             return;
         }
         if (!Float.isFinite(lastRawLux)) {
-            Toast.makeText(this, R.string.cal_verify_need_lux, Toast.LENGTH_SHORT).show();
+            showDialogMessage(getString(R.string.cal_verify_need_lux));
             return;
         }
         final float snapLux = lastRawLux;
@@ -167,11 +166,11 @@ public class CalibrationVerificationActivity extends AppCompatActivity {
                     try {
                         meter = Double.parseDouble(s.replace(',', '.'));
                     } catch (NumberFormatException e) {
-                        Toast.makeText(this, R.string.sensor_cal_error_parse_number, Toast.LENGTH_SHORT).show();
+                        showDialogMessage(getString(R.string.sensor_cal_error_parse_number));
                         return;
                     }
                     if (!Double.isFinite(meter) || meter <= 0.0) {
-                        Toast.makeText(this, R.string.cal_verify_meter_invalid, Toast.LENGTH_SHORT).show();
+                        showDialogMessage(getString(R.string.cal_verify_meter_invalid));
                         return;
                     }
                     samples.add(new CalibrationVerificationReport.VerificationSample(snapLux, meter));
@@ -186,7 +185,7 @@ public class CalibrationVerificationActivity extends AppCompatActivity {
             return;
         }
         if (samples.size() < MIN_SAMPLES) {
-            Toast.makeText(this, getString(R.string.cal_verify_need_more_samples, MIN_SAMPLES), Toast.LENGTH_SHORT).show();
+            showDialogMessage(getString(R.string.cal_verify_need_more_samples, MIN_SAMPLES));
             return;
         }
         lightSensorManager.stopListening();
@@ -233,8 +232,16 @@ public class CalibrationVerificationActivity extends AppCompatActivity {
             share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(Intent.createChooser(share, getString(R.string.cal_verify_export_csv)));
         } catch (IOException e) {
-            Toast.makeText(this, getString(R.string.cal_verify_export_fail, e.getMessage()), Toast.LENGTH_LONG).show();
+            showDialogMessage(getString(R.string.cal_verify_export_fail, e.getMessage()));
         }
+    }
+
+    private void showDialogMessage(@NonNull String message) {
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.cal_verify_finish))
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
     }
 
     @NonNull

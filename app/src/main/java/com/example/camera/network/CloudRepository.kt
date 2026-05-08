@@ -22,6 +22,12 @@ object CloudRepository {
     private val gson = Gson()
     private val jsonUtf8 = "application/json; charset=utf-8".toMediaType()
 
+    data class CurveUploadResult(
+        val success: Boolean,
+        val httpCode: Int,
+        val detail: String = "",
+    )
+
     /**
      * 上传本机 Debevec 曲线与绝对标定元数据（须在后台线程调用）。
      *
@@ -41,6 +47,35 @@ object CloudRepository {
         iso: Int,
         appVersion: String,
     ): Boolean {
+        return uploadCurveDetailed(
+            context,
+            model,
+            gCurve,
+            k,
+            greyCardDn,
+            rSquared,
+            dnMin,
+            dnMax,
+            sampleCount,
+            iso,
+            appVersion,
+        ).success
+    }
+
+    @JvmStatic
+    fun uploadCurveDetailed(
+        context: Context,
+        model: String,
+        gCurve: DoubleArray,
+        k: Double,
+        greyCardDn: Double,
+        rSquared: Double,
+        dnMin: Int,
+        dnMax: Int,
+        sampleCount: Int,
+        iso: Int,
+        appVersion: String,
+    ): CurveUploadResult {
         val app = context.applicationContext
         val api = NetworkModule.apiService(app)
         val payload = linkedMapOf<String, Any?>(
@@ -61,23 +96,26 @@ object CloudRepository {
             val resp = api.uploadCurve(body).execute()
             try {
                 val ok = resp.isSuccessful
+                val http = resp.code()
                 Log.i(
                     TAG,
                     "uploadCurve model=$model samples=$sampleCount r2=$rSquared iso=$iso " +
-                        "dn=[$dnMin,$dnMax] http=${resp.code()} ok=$ok",
+                        "dn=[$dnMin,$dnMax] http=$http ok=$ok",
                 )
                 if (!ok) {
                     val err = resp.errorBody()?.string()?.take(500)
                     Log.w(TAG, "uploadCurve error body: $err")
+                    CurveUploadResult(false, http, err ?: "")
+                } else {
+                    CurveUploadResult(true, http, "")
                 }
-                ok
             } finally {
                 resp.body()?.close()
                 resp.errorBody()?.close()
             }
         } catch (e: Exception) {
             Log.e(TAG, "uploadCurve failed model=$model samples=$sampleCount", e)
-            false
+            CurveUploadResult(false, -1, e.message ?: e.javaClass.simpleName)
         }
     }
 

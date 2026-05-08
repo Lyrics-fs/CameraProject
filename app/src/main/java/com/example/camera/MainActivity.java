@@ -31,7 +31,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
-import android.widget.Toast;
 import android.widget.Spinner;
 import android.widget.ArrayAdapter;
 import android.widget.AdapterView;
@@ -249,6 +248,8 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     private boolean isProgrammaticSeekBarUpdate = false;
     private boolean isRecommendationMode = false;
     private boolean isAdvancedTuningExpanded = false;
+    /** 曝光序列结束后 Debevec 解算仍在后台进行；解算完成（成功/失败）前不允许绝对标定。 */
+    private boolean isDebevecSolveInProgress = false;
     private boolean isCameraStartPending = false;
 
     // 相机参数（通过 Camera2 Interop 手动控制）
@@ -278,7 +279,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                             if (!shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)) {
                                 showPermissionSettingsDialog();
                             } else {
-                                Toast.makeText(this, "需要相机权限", Toast.LENGTH_SHORT).show();
+                                showToast("需要相机权限");
                             }
                         }
                     });
@@ -1001,8 +1002,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         String pseudoName = System.currentTimeMillis() + "_pseudo.jpg";
         android.net.Uri pseudoUri = imageRepository.saveJpegBitmap(pseudoBitmap, pseudoName);
         if (pseudoUri != null) {
-            runOnUiThread(() -> Toast.makeText(this,
-                    "已保存: " + pseudoName, Toast.LENGTH_SHORT).show());
+            showToast("已保存: " + pseudoName);
             updateStatus("保存成功", false, false);
         } else {
             reportError("保存伪彩色图像失败，请重试", null, true);
@@ -1114,7 +1114,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             Log.e(TAG, message);
         }
         updateStatus(message, true, canRetry);
-        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
+        showToast(message);
     }
 
     private void updateStatus(String message, boolean isError, boolean showRetry) {
@@ -1692,7 +1692,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             return;
         }
         if (!presenter.removeLastLevel1Sample()) {
-            Toast.makeText(this, R.string.level1_undo_nothing_toast, Toast.LENGTH_SHORT).show();
+            showToast(getString(R.string.level1_undo_nothing_toast));
             return;
         }
         refreshLevel1TableInfoAndSaveButton();
@@ -1723,18 +1723,18 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         }
         String lumStr = etLevel1Luminance.getText().toString().trim();
         if (lumStr.isEmpty()) {
-            Toast.makeText(this, "请输入亮度计读数", Toast.LENGTH_SHORT).show();
+            showToast("请输入亮度计读数");
             return;
         }
         double luminance;
         try {
             luminance = Double.parseDouble(lumStr.replace(',', '.'));
         } catch (NumberFormatException e) {
-            Toast.makeText(this, "亮度计读数格式无效", Toast.LENGTH_SHORT).show();
+            showToast("亮度计读数格式无效");
             return;
         }
         if (!Double.isFinite(luminance) || luminance <= 0.0) {
-            Toast.makeText(this, "请输入有效的亮度值", Toast.LENGTH_SHORT).show();
+            showToast("请输入有效的亮度值");
             return;
         }
         Double dn = getGreyCardAverageDN();
@@ -1742,17 +1742,15 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             if (greyCardNormRect == null
                     || greyCardNormRect.width() <= 0f
                     || greyCardNormRect.height() <= 0f) {
-                Toast.makeText(this, "请先圈选灰卡区域", Toast.LENGTH_SHORT).show();
+                showToast("请先圈选灰卡区域");
             } else {
-                Toast.makeText(this, "暂无分析帧，请稍候再试", Toast.LENGTH_SHORT).show();
+                showToast("暂无分析帧，请稍候再试");
             }
             return;
         }
         presenter.addLevel1Sample(dn, luminance);
         etLevel1Luminance.setText("");
-        Toast.makeText(this,
-                String.format(Locale.US, "已采集: DN=%.1f, L=%.1f cd/m²", dn, luminance),
-                Toast.LENGTH_SHORT).show();
+        showToast(String.format(Locale.US, "已采集: DN=%.1f, L=%.1f cd/m²", dn, luminance));
         refreshLevel1TableInfoAndSaveButton();
         refreshLevel1DnDisplay();
     }
@@ -1763,7 +1761,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         }
         int n = presenter.getLevel1Samples().size();
         if (n < 5) {
-            Toast.makeText(this, "至少需要 5 组数据", Toast.LENGTH_SHORT).show();
+            showToast("至少需要 5 组数据");
             return;
         }
         new AlertDialog.Builder(this)
@@ -1777,7 +1775,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                     refreshLevel1TableInfoAndSaveButton();
                     refreshLevel1CloudUploadUi();
                     presenter.refreshCenterLuminanceDisplay();
-                    Toast.makeText(this, R.string.level1_lookup_saved_local, Toast.LENGTH_SHORT).show();
+                    showToast(getString(R.string.level1_lookup_saved_local));
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
@@ -1991,10 +1989,15 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                             getString(R.string.abs_calibration_result_l3_line, f.k, f.greyCardLuminance),
                             getString(R.string.abs_l3_precision_notice)));
                 } else {
-                    tvCalibrationResult.setText(String.format(Locale.US,
+                    String base = String.format(Locale.US,
                             "%s\n\n%s",
                             getString(R.string.abs_calibration_result_meter_line, f.k, f.greyCardLuminance),
-                            getString(R.string.calibration_upload_privacy_notice)));
+                            getString(R.string.calibration_upload_privacy_notice));
+                    String uploadLine = presenter.getLastLevel2CurveUploadStatusLine();
+                    if (uploadLine != null && !uploadLine.isEmpty()) {
+                        base = base + "\n\n" + uploadLine;
+                    }
+                    tvCalibrationResult.setText(base);
                 }
                 return;
             }
@@ -2016,20 +2019,20 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
 
     private void confirmAndStartDebevecExposureSequence() {
         if (exposureSequenceCapture == null) {
-            Toast.makeText(this, "相机未就绪", Toast.LENGTH_SHORT).show();
+            showToast("相机未就绪");
             return;
         }
         if (exposureSequenceCapture.getState() != SequenceState.IDLE) {
-            Toast.makeText(this, "曝光序列进行中", Toast.LENGTH_SHORT).show();
+            showToast("曝光序列进行中");
             return;
         }
         if (isoRange == null || exposureRange == null) {
-            Toast.makeText(this, "无法读取曝光/ISO 范围", Toast.LENGTH_SHORT).show();
+            showToast("无法读取曝光/ISO 范围");
             return;
         }
         ArrayList<Double> sched = buildExposureScheduleFromSpinners();
         if (sched.size() < 4) {
-            Toast.makeText(this, "起始/结束快门跨度不足，请扩大档位范围（至少 4 张）", Toast.LENGTH_LONG).show();
+            showToastLong("起始/结束快门跨度不足，请扩大档位范围（至少 4 张）");
             return;
         }
         int iso = parseSequenceIsoFromUi();
@@ -2047,7 +2050,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         }
         ArrayList<Double> clamped = buildExposureScheduleFromSpinners();
         if (clamped.size() < 4) {
-            Toast.makeText(this, "曝光档位数不足", Toast.LENGTH_SHORT).show();
+            showToast("曝光档位数不足");
             return;
         }
         if (btnStartExposureSequence != null) {
@@ -2064,10 +2067,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             }
         });
         final int[] capturedCount = new int[]{0};
+        final int[] skippedCount = new int[]{0};
         int iso = parseSequenceIsoFromUi();
         ExposureSequenceCapture.SequenceConfig config =
                 new ExposureSequenceCapture.SequenceConfig(clamped, iso);
-        Toast.makeText(this, R.string.debevec_sequence_capture_toast, Toast.LENGTH_LONG).show();
+        showToastLong(getString(R.string.debevec_sequence_capture_toast));
         exposureSequenceCapture.startSequence(config, new ExposureSequenceCapture.CaptureCallback() {
             @Override
             public void onFrameCaptured(ExposureSequenceCapture.CapturedFrame frame) {
@@ -2078,7 +2082,12 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                         pbExposureSequence.setProgress(Math.min(c, pbExposureSequence.getMax()));
                     }
                     if (tvExposureProgress != null) {
-                        tvExposureProgress.setText(String.format(Locale.CHINA, "进度: %d/%d", c, total));
+                        tvExposureProgress.setText(String.format(
+                                Locale.CHINA,
+                                "进度: 有效 %d/%d（跳过 %d）",
+                                c,
+                                total,
+                                skippedCount[0]));
                     }
                 });
             }
@@ -2093,11 +2102,29 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                         pbExposureSequence.setProgress(pbExposureSequence.getMax());
                     }
                     if (tvExposureProgress != null) {
-                        tvExposureProgress.setText(String.format(Locale.CHINA, "进度: %d/%d", total, total));
+                        tvExposureProgress.setText(String.format(
+                                Locale.CHINA,
+                                "进度: 有效 %d/%d（跳过 %d）",
+                                frames != null ? frames.size() : capturedCount[0],
+                                total,
+                                skippedCount[0]));
                     }
                     applyCamera2Options();
                     updateDebevecStartSequenceButtonState();
+                    if (tvCalibrationResult != null) {
+                        tvCalibrationResult.setVisibility(View.VISIBLE);
+                        tvCalibrationResult.setText(getString(R.string.debevec_solving_in_progress));
+                    }
+                    int valid = frames != null ? frames.size() : capturedCount[0];
+                    if (skippedCount[0] > 0 || valid != total) {
+                        showToastLong(String.format(Locale.CHINA,
+                                "本次计划 %d 张；有效 %d 张；跳过 %d 张。上传门槛使用“有效帧数”。",
+                                total,
+                                valid,
+                                skippedCount[0]));
+                    }
                 });
+                isDebevecSolveInProgress = true;
                 presenter.solveAndSaveDebevecGFromFrames(frames, iso);
             }
 
@@ -2109,12 +2136,25 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                     }
                     applyCamera2Options();
                     updateDebevecStartSequenceButtonState();
-                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                    showToastLong(message);
                 });
             }
 
             @Override
             public void onFrameSkipped(int index, String reason) {
+                skippedCount[0]++;
+                int c = capturedCount[0];
+                int s = skippedCount[0];
+                runOnUiThread(() -> {
+                    if (tvExposureProgress != null) {
+                        tvExposureProgress.setText(String.format(
+                                Locale.CHINA,
+                                "进度: 有效 %d/%d（跳过 %d）",
+                                c,
+                                total,
+                                s));
+                    }
+                });
             }
         });
     }
@@ -2123,7 +2163,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         if (greyCardSelector == null) {
             return;
         }
-        Toast.makeText(this, R.string.grey_card_selection_enter_toast, Toast.LENGTH_LONG).show();
+        showToastLong(getString(R.string.grey_card_selection_enter_toast));
         if (tvGreyCardModeHint != null) {
             tvGreyCardModeHint.setVisibility(View.VISIBLE);
         }
@@ -2154,7 +2194,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         }
         RectF n = greyCardSelector.getSelectedRectNormalized();
         if (n == null || n.width() <= 0f || n.height() <= 0f) {
-            Toast.makeText(this, R.string.grey_card_confirm_invalid, Toast.LENGTH_SHORT).show();
+            showToast(getString(R.string.grey_card_confirm_invalid));
             return;
         }
         greyCardNormRect = new RectF(n);
@@ -2353,20 +2393,19 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         btnAbsoluteCalibrate.setOnClickListener(v -> runAbsoluteGreyCardCalibration());
     }
 
-    /**
-     * ColorOS 等机型可能限制 Toast；同步写入标定结果区并尽量把 Toast 顶到可见区域。
-     */
+    /** 标定反馈：同步写入结果区，并使用弹窗显示完整文本。 */
     private void showAbsoluteCalibrationFeedback(String message) {
         runOnUiThread(() -> {
             if (tvCalibrationResult != null) {
                 tvCalibrationResult.setVisibility(View.VISIBLE);
                 tvCalibrationResult.setText(message);
             }
-            Toast toast = Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG);
-            int yOffset = (int) TypedValue.applyDimension(
-                    TypedValue.COMPLEX_UNIT_DIP, 140f, getResources().getDisplayMetrics());
-            toast.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, yOffset);
-            toast.show();
+            if (message == null || message.trim().isEmpty()) return;
+            new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("提示")
+                    .setMessage(message.trim())
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
         });
     }
 
@@ -2388,6 +2427,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         hideSoftKeyboardForCalibrationTap();
         if (btnAbsoluteCalibrate != null) {
             btnAbsoluteCalibrate.requestFocus();
+        }
+        if (isDebevecSolveInProgress) {
+            showAbsoluteCalibrationFeedback(
+                    "曝光序列已完成，正在后台解算并保存 g(DN)。请等待“g 已保存”提示后再做灰卡绝对标定。");
+            return;
         }
         if (presenter == null) {
             showAbsoluteCalibrationFeedback("相机模块未就绪");
@@ -2453,6 +2497,12 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                 String meterDone = getString(R.string.level2_meter_calibrate_done_toast, f.k, f.greyCardPixelValue)
                         + "\n\n"
                         + getString(R.string.calibration_upload_privacy_notice);
+                if (presenter != null) {
+                    String gate = presenter.buildLevel2CurveUploadEligibilitySummaryForMeterPath();
+                    if (gate != null && !gate.isEmpty()) {
+                        meterDone = meterDone + "\n\n" + gate;
+                    }
+                }
                 showAbsoluteCalibrationFeedback(meterDone);
                 if (presenter != null) {
                     presenter.scheduleLevel2CurveUploadIfEligibleAfterMeterCalibration();
@@ -2523,7 +2573,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         // 禁用状态下系统不会派发点击，ColorOS 上用户会感觉「完全没反应」；保持可点并用透明度提示就绪程度。
         btnAbsoluteCalibrate.setEnabled(true);
         btnAbsoluteCalibrate.setClickable(true);
-        btnAbsoluteCalibrate.setAlpha(canSave ? 1f : 0.48f);
+        if (isDebevecSolveInProgress) {
+            btnAbsoluteCalibrate.setAlpha(0.48f);
+        } else {
+            btnAbsoluteCalibrate.setAlpha(canSave ? 1f : 0.48f);
+        }
         updateDebevecStartSequenceButtonState();
     }
 
@@ -2694,12 +2748,26 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
 
     @Override
     public void showToast(String message) {
-        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_SHORT).show());
+        showToastOrDialog(message, false);
     }
 
     @Override
     public void showToastLong(String message) {
-        runOnUiThread(() -> Toast.makeText(this, message, Toast.LENGTH_LONG).show());
+        showToastOrDialog(message, true);
+    }
+
+    private void showToastOrDialog(String message, boolean preferLong) {
+        runOnUiThread(() -> {
+            if (message == null || message.trim().isEmpty()) {
+                return;
+            }
+            String msg = message.trim();
+            new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("提示")
+                    .setMessage(msg)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+        });
     }
 
     @Override
@@ -2793,6 +2861,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     @Override
     public void onDebevecGSaved() {
         runOnUiThread(() -> {
+            isDebevecSolveInProgress = false;
             updateAbsoluteCalibrateButtonState();
             refreshDebevecStatusLine();
             refreshCalibrationResultPanel();
@@ -2801,6 +2870,17 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             }
             refreshLevel1TableInfoAndSaveButton();
             refreshLevel1CloudUploadUi();
+        });
+    }
+
+    @Override
+    public void onDebevecSolveFailed(String message) {
+        runOnUiThread(() -> {
+            isDebevecSolveInProgress = false;
+            updateAbsoluteCalibrateButtonState();
+            if (message != null && !message.isEmpty()) {
+                showAbsoluteCalibrationFeedback("Debevec 解算失败：\n" + message);
+            }
         });
     }
 
@@ -2816,6 +2896,11 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     @Override
     public void onLevel1LookupUploadStateChanged() {
         runOnUiThread(this::refreshLevel1CloudUploadUi);
+    }
+
+    @Override
+    public void onLevel2CurveUploadStateChanged() {
+        runOnUiThread(this::refreshCalibrationResultPanel);
     }
 
     @Override

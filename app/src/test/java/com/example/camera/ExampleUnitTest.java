@@ -128,8 +128,10 @@ public class ExampleUnitTest {
         @Override public void updateCurveSource(String source) {}
         @Override public void updateCurveSourceBadge(String badgeText) {}
         @Override public void onDebevecGSaved() {}
+        @Override public void onDebevecSolveFailed(String message) {}
         @Override public void notifyAbsoluteCalibrationInputsMaybeChanged() {}
         @Override public void onLevel1LookupUploadStateChanged() {}
+        @Override public void onLevel2CurveUploadStateChanged() {}
         @Override public void onCalibrationLowQualityComplete() {}
         @Override public void onCalibrationAbnormalComplete() {}
         @Override public void onCalibrationHighMediumComplete(String qualityTier) {}
