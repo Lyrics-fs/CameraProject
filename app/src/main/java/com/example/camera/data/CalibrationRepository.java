@@ -2,12 +2,15 @@ package com.example.camera.data;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 
 import com.example.camera.model.calibration.CalibrationFactor;
 import com.example.camera.model.calibration.LookupTable;
 import com.example.camera.model.calibration.LookupTableRepository;
 
 public class CalibrationRepository {
+
+    private static final String TAG = "CalibrationRepo";
     private static final String PREFS_NAME = "calibration_prefs";
     private static final String KEY_A = "curve_a";
     private static final String KEY_B = "curve_b";
@@ -125,10 +128,14 @@ public class CalibrationRepository {
     // Debevec g(Z) + 绝对亮度标定（灰卡 + 亮度计或传感器 L3 估算）
     // -------------------------------------------------------------------------
 
-    /** 持久化 Debevec 离散响应曲线 {@code g[0..255]}（本机写入；清除云端曲线来源标记）。 */
-    public void saveDebevecG(double[] g) {
+    /**
+     * 持久化 Debevec 离散响应曲线 {@code g[0..255]}（本机写入；清除云端曲线来源标记）。
+     *
+     * @return {@code commit()} 是否成功；部分机型上 {@code apply()} 异步可能导致紧接着的读取竞态，故用同步提交。
+     */
+    public boolean saveDebevecG(double[] g) {
         if (g == null || g.length < 256) {
-            return;
+            return false;
         }
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < 256; i++) {
@@ -137,13 +144,17 @@ public class CalibrationRepository {
             }
             sb.append(Double.toString(g[i]));
         }
-        sharedPreferences.edit()
+        boolean ok = sharedPreferences.edit()
                 .remove(KEY_DEBEVEC_CLOUD_SOURCE)
                 .remove(KEY_DEBEVEC_R2_LOG_DELTA_T)
                 .remove(KEY_DEBEVEC_FRAME_COUNT)
                 .remove(KEY_DEBEVEC_SEQUENCE_ISO)
                 .putString(KEY_DEBEVEC_G, sb.toString())
-                .apply();
+                .commit();
+        if (!ok) {
+            Log.e(TAG, "saveDebevecG: SharedPreferences.commit returned false");
+        }
+        return ok;
     }
 
     /**
@@ -185,14 +196,14 @@ public class CalibrationRepository {
         if (s == null || s.isEmpty()) {
             return null;
         }
-        String[] parts = s.split(",");
+        String[] parts = s.split(",", -1);
         if (parts.length < 256) {
             return null;
         }
         try {
             double[] g = new double[256];
             for (int i = 0; i < 256; i++) {
-                g[i] = Double.parseDouble(parts[i]);
+                g[i] = Double.parseDouble(parts[i].trim());
             }
             return g;
         } catch (NumberFormatException e) {

@@ -128,6 +128,7 @@ public class ExampleUnitTest {
         @Override public void updateCurveSource(String source) {}
         @Override public void updateCurveSourceBadge(String badgeText) {}
         @Override public void onDebevecGSaved() {}
+        @Override public void notifyAbsoluteCalibrationInputsMaybeChanged() {}
         @Override public void onLevel1LookupUploadStateChanged() {}
         @Override public void onCalibrationLowQualityComplete() {}
         @Override public void onCalibrationAbnormalComplete() {}

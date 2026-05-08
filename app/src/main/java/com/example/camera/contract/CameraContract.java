@@ -51,6 +51,12 @@ public interface CameraContract {
         /** Debevec {@code g(DN)} 已从曝光序列写入本地后调用，用于刷新绝对亮度校准等 UI。 */
         void onDebevecGSaved();
 
+        /**
+         * ImageAnalysis 已更新与灰卡标定共用的 Y 平面快照；实现类应在主线程刷新
+         * 「计算并保存校准系数」可用态与灰卡 DN 等。
+         */
+        void notifyAbsoluteCalibrationInputsMaybeChanged();
+
         /** Level1 查表云端上传成功/失败后，刷新「已上传」与重传按钮等 UI。 */
         void onLevel1LookupUploadStateChanged();
 

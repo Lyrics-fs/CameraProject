@@ -805,7 +805,6 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="6dp"
                             android:background="@drawable/bg_preview_hud"
-                            android:enabled="false"
                             android:minHeight="32dp"
                             android:text="@string/abs_btn_save_meter"
                             android:textAllCaps="false"

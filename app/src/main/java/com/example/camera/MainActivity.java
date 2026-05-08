@@ -41,11 +41,14 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.Window;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.ScrollView;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 
@@ -708,10 +711,8 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                     android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES);
             if (apertures != null && apertures.length > 0) aperture = apertures[0];
 
-            // 初始化默认值
-            if (isoRange != null) currentIso = isoRange.getLower();
-            if (exposureRange != null) currentExposure = exposureRange.getLower();
             presenter.setCameraRanges(isoRange, exposureRange, aperture);
+            presenter.syncHardwareExposureFromModelAfterRangeInit();
         } catch (Exception e) {
             reportError("读取相机参数失败，请重试", e, true);
         }
@@ -1322,22 +1323,19 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
     }
 
     private void setupGreyCardAbsoluteCalibration() {
-        if (greyCardSelector == null) {
-            updateAbsoluteCalibrateButtonState();
-            return;
+        if (greyCardSelector != null) {
+            if (btnSelectGreyCard != null) {
+                btnSelectGreyCard.setOnClickListener(v -> enterGreyCardSelectionMode());
+            }
+            if (btnGreyCardCancel != null) {
+                btnGreyCardCancel.setOnClickListener(v -> hideGreyCardSelectionOverlay());
+            }
+            if (btnGreyCardConfirm != null) {
+                btnGreyCardConfirm.setOnClickListener(v -> confirmGreyCardSelection());
+            }
         }
-        if (btnSelectGreyCard != null) {
-            btnSelectGreyCard.setOnClickListener(v -> enterGreyCardSelectionMode());
-        }
-        if (btnGreyCardCancel != null) {
-            btnGreyCardCancel.setOnClickListener(v -> hideGreyCardSelectionOverlay());
-        }
-        if (btnGreyCardConfirm != null) {
-            btnGreyCardConfirm.setOnClickListener(v -> confirmGreyCardSelection());
-        }
-        if (btnAbsoluteCalibrate != null) {
-            btnAbsoluteCalibrate.setOnClickListener(v -> runAbsoluteGreyCardCalibration());
-        }
+        ensureAbsoluteCalibrateClickListener();
+        setupCalibrationEditImeScroll(etGreyCardLuminance);
         if (etGreyCardLuminance != null) {
             etGreyCardLuminance.addTextChangedListener(new TextWatcher() {
                 @Override
@@ -1389,6 +1387,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                 }
             });
         }
+        setupCalibrationEditImeScroll(etSequenceIso);
         if (etSequenceIso != null) {
             etSequenceIso.addTextChangedListener(new TextWatcher() {
                 @Override
@@ -1432,6 +1431,9 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         debevecBlockExpanded = expanded;
         if (llDebevecDetails != null) {
             llDebevecDetails.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        }
+        if (expanded) {
+            ensureAbsoluteCalibrateClickListener();
         }
         updateCalibrationContentWrapperVisibility();
         syncDebevecInnerScrollLayout();
@@ -1488,18 +1490,7 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                 }
             });
         }
-        if (etLevel1Luminance != null && svLevel1Scroll != null) {
-            etLevel1Luminance.setOnFocusChangeListener((v, hasFocus) -> {
-                if (!hasFocus) {
-                    return;
-                }
-                svLevel1Scroll.post(() -> {
-                    Rect r = new Rect();
-                    v.getDrawingRect(r);
-                    svLevel1Scroll.requestChildRectangleOnScreen(v, r, true);
-                });
-            });
-        }
+        setupCalibrationEditImeScroll(etLevel1Luminance);
         refreshLevel1TableInfoAndSaveButton();
         refreshLevel1DnDisplay();
         WorkManager.getInstance(this)
@@ -2289,9 +2280,121 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         refreshLevel1GreyRegionStatus();
     }
 
+    /**
+     * L1 查表 / L2 灰卡亮度等输入框在预览左下角 ScrollView 内，弹键盘后易被挡住；
+     * 结合底部 padding 留白 + 可见区域检测滚动。
+     */
+    private void setupCalibrationEditImeScroll(@Nullable EditText et) {
+        if (et == null) {
+            return;
+        }
+        et.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus) {
+                return;
+            }
+            scheduleScrollCalibrationFieldAboveKeyboard((EditText) v);
+        });
+    }
+
+    private void scheduleScrollCalibrationFieldAboveKeyboard(EditText et) {
+        Runnable r = () -> scrollCalibrationFieldAboveKeyboard(et);
+        et.post(r);
+        et.postDelayed(r, 50);
+        et.postDelayed(r, 160);
+        et.postDelayed(r, 380);
+    }
+
+    private void scrollCalibrationFieldAboveKeyboard(EditText et) {
+        if (et == null || !et.isShown() || !et.hasFocus()) {
+            return;
+        }
+        Rect visible = new Rect();
+        getWindow().getDecorView().getWindowVisibleDisplayFrame(visible);
+        int visibleBottom = visible.bottom;
+
+        Rect etGlobal = new Rect();
+        if (!et.getGlobalVisibleRect(etGlobal)) {
+            return;
+        }
+        int marginPx = (int) TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, 36f, getResources().getDisplayMetrics());
+
+        Rect local = new Rect();
+        et.getDrawingRect(local);
+        local.bottom += marginPx * 3;
+        et.requestRectangleOnScreen(local, false);
+
+        if (etGlobal.bottom <= visibleBottom - marginPx) {
+            return;
+        }
+        int overlap = etGlobal.bottom - (visibleBottom - marginPx);
+        ScrollView sv = findAncestorScrollView(et);
+        if (sv != null && overlap > 0) {
+            sv.smoothScrollBy(0, overlap);
+        }
+    }
+
+    @Nullable
+    private static ScrollView findAncestorScrollView(View v) {
+        ViewParent p = v.getParent();
+        while (p instanceof ViewGroup) {
+            if (p instanceof ScrollView) {
+                return (ScrollView) p;
+            }
+            p = p.getParent();
+        }
+        return null;
+    }
+
+    private void ensureAbsoluteCalibrateClickListener() {
+        if (btnAbsoluteCalibrate == null) {
+            return;
+        }
+        btnAbsoluteCalibrate.setOnClickListener(v -> runAbsoluteGreyCardCalibration());
+    }
+
+    /**
+     * ColorOS 等机型可能限制 Toast；同步写入标定结果区并尽量把 Toast 顶到可见区域。
+     */
+    private void showAbsoluteCalibrationFeedback(String message) {
+        runOnUiThread(() -> {
+            if (tvCalibrationResult != null) {
+                tvCalibrationResult.setVisibility(View.VISIBLE);
+                tvCalibrationResult.setText(message);
+            }
+            Toast toast = Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG);
+            int yOffset = (int) TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP, 140f, getResources().getDisplayMetrics());
+            toast.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, yOffset);
+            toast.show();
+        });
+    }
+
+    private void hideSoftKeyboardForCalibrationTap() {
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm == null) {
+            return;
+        }
+        View tokenView = getCurrentFocus();
+        if (tokenView == null && btnAbsoluteCalibrate != null) {
+            tokenView = btnAbsoluteCalibrate;
+        }
+        if (tokenView != null) {
+            imm.hideSoftInputFromWindow(tokenView.getWindowToken(), 0);
+        }
+    }
+
     private void runAbsoluteGreyCardCalibration() {
+        hideSoftKeyboardForCalibrationTap();
+        if (btnAbsoluteCalibrate != null) {
+            btnAbsoluteCalibrate.requestFocus();
+        }
+        if (presenter == null) {
+            showAbsoluteCalibrationFeedback("相机模块未就绪");
+            return;
+        }
         if (greyCardNormRect == null) {
-            Toast.makeText(this, "请先圈选灰卡区域", Toast.LENGTH_SHORT).show();
+            showAbsoluteCalibrationFeedback("请先圈选灰卡区域");
             return;
         }
         final double lKnown;
@@ -2299,18 +2402,39 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         if (isAbsInputSensorMode()) {
             lKnown = resolveSensorLuminanceEstimateCdM2();
             if (!Double.isFinite(lKnown) || lKnown <= 0) {
-                Toast.makeText(this, "环境光估算无效，请稍候或改用亮度计", Toast.LENGTH_SHORT).show();
+                showAbsoluteCalibrationFeedback("环境光估算无效，请稍候或改用亮度计");
                 return;
             }
             absLevel = CalibrationFactor.ABS_LEVEL_SENSOR_LUX_ESTIMATE;
         } else {
             Double lux = parseGreyCardLuminanceInput();
             if (lux == null) {
-                Toast.makeText(this, "请输入灰卡亮度计实测 cd/m²", Toast.LENGTH_SHORT).show();
+                showAbsoluteCalibrationFeedback("请输入有效的灰卡亮度（cd/m²），输入后先收起键盘再点保存");
                 return;
             }
             lKnown = lux;
             absLevel = CalibrationFactor.ABS_LEVEL_BRIGHTNESS_METER;
+        }
+        CalibrationRepository absRepo = presenter.getCalibrationRepository();
+        if (absRepo == null || !absRepo.hasDebevecG()) {
+            StringBuilder hint = new StringBuilder();
+            hint.append("本机尚未检测到已保存的 Debevec 曲线 g(DN)。\n\n");
+            hint.append("说明：「拍完曝光序列」只表示采集完成；必须在后台解算成功并写入后，才算完成标定。\n");
+            hint.append("若解算失败或存储失败，不会出现「g 已保存」类提示，此时不能算绝对亮度。\n\n");
+            hint.append("请展开本页「Level 2 响应曲线」看状态行；然后可重拍序列（机身勿动、灰卡勿过曝/死黑）。\n");
+            if (presenter != null) {
+                String last = presenter.getLastDebevecSolveFailureHint();
+                if (last != null && !last.isEmpty()) {
+                    hint.append("\n上次序列后台处理记录：").append(last);
+                }
+            }
+            showAbsoluteCalibrationFeedback(hint.toString());
+            return;
+        }
+        if (getGreyCardAverageDN() == null) {
+            showAbsoluteCalibrationFeedback(
+                    "预览分析帧尚未就绪：请保持本页相机预览数秒；若仍失败请切换前后台或重启应用。");
+            return;
         }
         try {
             CalibrationFactor f = presenter.calibrateAbsoluteLuminanceFromNormRect(
@@ -2324,12 +2448,12 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
                 String l3Done = getString(R.string.abs_l3_calibrate_done_toast, f.k, lKnown, f.greyCardPixelValue)
                         + "\n\n"
                         + getString(R.string.abs_l3_precision_notice);
-                Toast.makeText(this, l3Done, Toast.LENGTH_LONG).show();
+                showAbsoluteCalibrationFeedback(l3Done);
             } else {
                 String meterDone = getString(R.string.level2_meter_calibrate_done_toast, f.k, f.greyCardPixelValue)
                         + "\n\n"
                         + getString(R.string.calibration_upload_privacy_notice);
-                Toast.makeText(this, meterDone, Toast.LENGTH_LONG).show();
+                showAbsoluteCalibrationFeedback(meterDone);
                 if (presenter != null) {
                     presenter.scheduleLevel2CurveUploadIfEligibleAfterMeterCalibration();
                 }
@@ -2341,7 +2465,10 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             refreshGreyCardRegionStatusUi();
         } catch (IllegalArgumentException | IllegalStateException e) {
             String msg = e.getMessage();
-            Toast.makeText(this, msg != null ? msg : "校准失败", Toast.LENGTH_LONG).show();
+            showAbsoluteCalibrationFeedback(msg != null ? msg : "校准失败");
+        } catch (Exception e) {
+            showAbsoluteCalibrationFeedback(
+                    e.getMessage() != null ? e.getMessage() : "校准失败（未知错误）");
         }
     }
 
@@ -2350,7 +2477,16 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
         if (etGreyCardLuminance == null) {
             return null;
         }
-        String s = etGreyCardLuminance.getText().toString().trim().replace(',', '.');
+        String raw = etGreyCardLuminance.getText().toString().trim()
+                .replace("\u00A0", "")
+                .replace("\uFEFF", "")
+                .replace("\u200B", "");
+        if (raw.isEmpty()) {
+            return null;
+        }
+        String s = java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFKC)
+                .replace('\uFF0C', '.')
+                .replace(',', '.');
         if (s.isEmpty()) {
             return null;
         }
@@ -2384,7 +2520,10 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             boolean hasLux = parseGreyCardLuminanceInput() != null;
             canSave = hasG && hasRect && hasLux;
         }
-        btnAbsoluteCalibrate.setEnabled(canSave);
+        // 禁用状态下系统不会派发点击，ColorOS 上用户会感觉「完全没反应」；保持可点并用透明度提示就绪程度。
+        btnAbsoluteCalibrate.setEnabled(true);
+        btnAbsoluteCalibrate.setClickable(true);
+        btnAbsoluteCalibrate.setAlpha(canSave ? 1f : 0.48f);
         updateDebevecStartSequenceButtonState();
     }
 
@@ -2662,6 +2801,15 @@ public class MainActivity extends AppCompatActivity implements CameraContract.Vi
             }
             refreshLevel1TableInfoAndSaveButton();
             refreshLevel1CloudUploadUi();
+        });
+    }
+
+    @Override
+    public void notifyAbsoluteCalibrationInputsMaybeChanged() {
+        runOnUiThread(() -> {
+            updateAbsoluteCalibrateButtonState();
+            refreshGreyCardRegionStatusUi();
+            refreshLevel1DnDisplay();
         });
     }
 

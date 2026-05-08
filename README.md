@@ -230,6 +230,7 @@ gradle :app:installDebug
 
 ## 文档
 
+- **`docs/LaboratoryOperationGuide.md`**：**实验室非开发人员** 现场操作步骤（准备物品、Debevec、灰卡、Level1 查表、上传与常见问题）；可打印分发。
 - **`docs/CameraResponseCalibration_UserGuide.md`**：正文仍以历史 **BV / APEX** 采样流程为主（与当前主界面 **Debevec + 灰卡 K** 不完全一致）；文末已补充 **Level 1 查表云端上传** 与 **发版 / FC 对齐** 说明。**实际操作与上传条件请以本文与界面为准**。
 - 仓库内**暂无**单独的 `CameraResponseCalibration_TechnicalDesign.md`；技术细节以源码与本文「当前实现概览」「关键类型」为准。
 

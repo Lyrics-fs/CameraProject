@@ -6,6 +6,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.ImageFormat;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.util.Size;
 import android.util.Range;
@@ -83,6 +84,11 @@ public class CameraPresenter implements CameraContract.Presenter {
     private volatile double latestMeanY = Double.NaN;
     /** 最近一次成功保存 Debevec g 时的简短诊断（供界面结果区展示）。 */
     private volatile String lastDebevecDiagnosticsSummary = "";
+    /**
+     * 最近一次曝光序列后台解算的失败原因（成功时清空）。
+     * 用于解释「已拍过序列但 hasDebevecG 仍为 false」——通常是解算抛错或未写入。
+     */
+    private volatile String lastDebevecSolveFailureHint = "";
     /** 与 {@link ImageAnalysis} 同分辨率的 Y 平面紧凑拷贝（行优先，长度 w×h），供灰卡标定取样。 */
     private final Object analysisYSnapshotLock = new Object();
     private byte[] lastAnalysisYCompact;
@@ -109,6 +115,9 @@ public class CameraPresenter implements CameraContract.Presenter {
             AUTO_APPLY_STEP_RATIO_DEFAULT,
             AUTO_APPLY_BV_DELTA_THRESHOLD_DEFAULT
     );
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private long lastAbsCalibrationUiNotifyMs;
+    private static final long ABS_CALIBRATION_UI_NOTIFY_MIN_MS = 200L;
 
     // Level 1 实验室 DN→L 查表采集与持久化
     private LookupTableRepository lookupTableRepository;
@@ -331,9 +340,55 @@ public class CameraPresenter implements CameraContract.Presenter {
         settings.setExposureRange(exposureRange);
         this.aperture = aperture;
         settings.setAperture(aperture);
-        if (isoRange != null) settings.setIso(isoRange.getLower());
-        if (exposureRange != null) settings.setExposureTime(exposureRange.getLower());
+        if (isoRange != null) {
+            int lo = isoRange.getLower();
+            int hi = isoRange.getUpper();
+            int safeLo = Math.max(lo, PREVIEW_SAFE_MIN_ISO);
+            int safeHi = Math.min(hi, PREVIEW_SAFE_MAX_ISO);
+            int initIso = safeLo <= safeHi ? (safeLo + safeHi) / 2 : (lo + hi) / 2;
+            initIso = Math.max(lo, Math.min(hi, initIso));
+            settings.setIso(initIso);
+        }
+        if (exposureRange != null) {
+            long lo = exposureRange.getLower();
+            long hi = exposureRange.getUpper();
+            long safeLo = Math.max(lo, PREVIEW_SAFE_MIN_EXPOSURE_NS);
+            long safeHi = Math.min(hi, PREVIEW_SAFE_MAX_EXPOSURE_NS);
+            long initExp;
+            if (safeLo <= safeHi) {
+                long targetNs = 10_000_000L;
+                initExp = Math.max(safeLo, Math.min(safeHi, targetNs));
+            } else {
+                initExp = lo + Math.max(1L, (hi - lo) / 4);
+                initExp = Math.max(lo, Math.min(hi, initExp));
+            }
+            settings.setExposureTime(initExp);
+        }
         model.updateCameraSettings(settings);
+    }
+
+    /**
+     * 在 {@link #setCameraRanges} 之后调用：把模型里的 ISO/快门推到硬件与滑杆，避免仍停留在「硬件下限快门」导致整屏发黑。
+     */
+    public void syncHardwareExposureFromModelAfterRangeInit() {
+        CameraSettings settings = model.getCameraSettings();
+        Range<Integer> isoR = settings.getIsoRange();
+        Range<Long> expR = settings.getExposureRange();
+        if (isoR == null || expR == null) {
+            return;
+        }
+        int iso = settings.getIso();
+        long exp = settings.getExposureTime();
+        int isoProgress = toProgressInt(iso, isoR.getLower(), isoR.getUpper());
+        int exposureProgress = toProgressLong(exp, expR.getLower(), expR.getUpper());
+        view.setSeekBarProgress(R.id.seekBarBrightness, 0);
+        view.setSeekBarProgress(R.id.seekBarIso, isoProgress);
+        view.setSeekBarProgress(R.id.seekBarExposure, exposureProgress);
+        view.updateIsoDisplay(iso);
+        view.updateExposureDisplay(formatExposureTime(exp));
+        view.applyCameraIsoParameter(iso);
+        view.applyCameraExposureParameter(exp);
+        updateExposureValueDisplay(settings);
     }
 
     @Override
@@ -448,11 +503,17 @@ public class CameraPresenter implements CameraContract.Presenter {
         imageAnalysis = new ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setTargetResolution(new Size(AUTO_EXPOSURE_ANALYSIS_WIDTH, AUTO_EXPOSURE_ANALYSIS_HEIGHT))
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .build();
 
         imageAnalysis.setAnalyzer(analysisExecutor, image -> {
             try {
                 snapshotAnalysisYPlane(image);
+                long now = System.currentTimeMillis();
+                if (now - lastAbsCalibrationUiNotifyMs >= ABS_CALIBRATION_UI_NOTIFY_MIN_MS) {
+                    lastAbsCalibrationUiNotifyMs = now;
+                    mainHandler.post(view::notifyAbsoluteCalibrationInputsMaybeChanged);
+                }
                 CameraModel.ExposureRecommendation recommendation = analyzeExposureRecommendation(image);
                 double meanY = estimateMeanLuma(image);
                 latestMeanY = meanY;
@@ -937,31 +998,69 @@ public class CameraPresenter implements CameraContract.Presenter {
         if (image == null || image.getPlanes().length == 0) {
             return;
         }
-        if (image.getFormat() != ImageFormat.YUV_420_888) {
-            return;
-        }
         int w = image.getWidth();
         int h = image.getHeight();
         if (w < 1 || h < 1) {
             return;
         }
-        ImageProxy.PlaneProxy yPlane = image.getPlanes()[0];
-        java.nio.ByteBuffer buf = yPlane.getBuffer().duplicate();
-        int rowStride = yPlane.getRowStride();
-        int pixelStride = yPlane.getPixelStride();
-        byte[] compact = new byte[w * h];
-        int idx = 0;
-        for (int y = 0; y < h; y++) {
-            int rowStart = y * rowStride;
-            for (int x = 0; x < w; x++) {
-                compact[idx++] = buf.get(rowStart + x * pixelStride);
+        int format = image.getFormat();
+        byte[] compact = null;
+        if (format == ImageFormat.YUV_420_888) {
+            ImageProxy.PlaneProxy yPlane = image.getPlanes()[0];
+            java.nio.ByteBuffer buf = yPlane.getBuffer().duplicate();
+            int rowStride = yPlane.getRowStride();
+            int pixelStride = yPlane.getPixelStride();
+            compact = new byte[w * h];
+            int idx = 0;
+            for (int y = 0; y < h; y++) {
+                int rowStart = y * rowStride;
+                for (int x = 0; x < w; x++) {
+                    compact[idx++] = buf.get(rowStart + x * pixelStride);
+                }
             }
+        } else if (format == ImageFormat.FLEX_RGBA_8888
+                || format == PixelFormat.RGBA_8888) {
+            compact = snapshotCompactLumaFromRgba8888(image, w, h);
+        }
+        if (compact == null) {
+            return;
         }
         synchronized (analysisYSnapshotLock) {
             lastAnalysisYCompact = compact;
             lastAnalysisW = w;
             lastAnalysisH = h;
         }
+    }
+
+    /**
+     * FLEX_RGBA / RGBA 单平面 → 与 Y 平面相同的行优先 luma（BT.601，0～255）。
+     */
+    private static byte[] snapshotCompactLumaFromRgba8888(ImageProxy image, int w, int h) {
+        ImageProxy.PlaneProxy plane = image.getPlanes()[0];
+        java.nio.ByteBuffer buf = plane.getBuffer().duplicate();
+        int rowStride = plane.getRowStride();
+        int pixelStride = plane.getPixelStride();
+        if (pixelStride < 4) {
+            return null;
+        }
+        byte[] compact = new byte[w * h];
+        for (int y = 0; y < h; y++) {
+            int rowStart = y * rowStride;
+            for (int x = 0; x < w; x++) {
+                int o = rowStart + x * pixelStride;
+                int r = buf.get(o) & 0xFF;
+                int g = buf.get(o + 1) & 0xFF;
+                int b = buf.get(o + 2) & 0xFF;
+                int lum = (int) Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+                if (lum < 0) {
+                    lum = 0;
+                } else if (lum > 255) {
+                    lum = 255;
+                }
+                compact[y * w + x] = (byte) lum;
+            }
+        }
+        return compact;
     }
 
     /**
@@ -1051,8 +1150,9 @@ public class CameraPresenter implements CameraContract.Presenter {
     }
 
     public void saveDebevecG(double[] g) {
-        if (getCalibrationRepository() != null) {
-            getCalibrationRepository().saveDebevecG(g);
+        CalibrationRepository r = getCalibrationRepository();
+        if (r != null) {
+            r.saveDebevecG(g);
         }
     }
 
@@ -1069,7 +1169,8 @@ public class CameraPresenter implements CameraContract.Presenter {
         analysisExecutor.execute(() -> {
             try {
                 if (frames == null || frames.size() < 4) {
-                    view.showToast("有效帧过少（至少 4 张），无法解算 g(DN)");
+                    lastDebevecSolveFailureHint = "有效帧少于 4 张，未解算也未保存 g";
+                    view.showToastLong("有效帧过少（至少 4 张），无法解算 g(DN)，曲线未保存");
                     return;
                 }
                 ArrayList<ExposureSequenceCapture.CapturedFrame> sorted =
@@ -1081,7 +1182,8 @@ public class CameraPresenter implements CameraContract.Presenter {
                 ArrayList<Double> times = new ArrayList<>(sorted.size());
                 for (ExposureSequenceCapture.CapturedFrame f : sorted) {
                     if (f.getWidth() != w0 || f.getHeight() != h0) {
-                        view.showToast("各帧分辨率不一致，已放弃解算");
+                        lastDebevecSolveFailureHint = "各帧分辨率不一致，已放弃解算";
+                        view.showToastLong("各帧分辨率不一致，已放弃解算，曲线未保存");
                         return;
                     }
                     images.add(f.getPixels());
@@ -1094,19 +1196,30 @@ public class CameraPresenter implements CameraContract.Presenter {
                         40.0,
                         200
                 );
-                saveDebevecG(result.getG());
-                CalibrationRepository repoMeta = getCalibrationRepository();
-                if (repoMeta != null) {
-                    repoMeta.saveDebevecSolveMetadata(
-                            result.getRSquaredLogDeltaT(),
-                            frames.size(),
-                            sequenceIso);
+                double[] gOut = result.getG();
+                if (gOut == null || gOut.length < 256) {
+                    lastDebevecSolveFailureHint = "解算返回的 g 长度异常（<256），未写入本机";
+                    view.showToastLong("Debevec 解算结果异常，g 未保存，请重拍曝光序列");
+                    return;
                 }
+                CalibrationRepository repoW = getCalibrationRepository();
+                if (repoW == null || !repoW.saveDebevecG(gOut)) {
+                    lastDebevecSolveFailureHint = repoW == null
+                            ? "标定仓库未初始化，g 未保存"
+                            : "g 写入本机失败，请检查存储空间与系统限制后重拍序列";
+                    view.showToastLong(lastDebevecSolveFailureHint);
+                    return;
+                }
+                lastDebevecSolveFailureHint = "";
+                repoW.saveDebevecSolveMetadata(
+                        result.getRSquaredLogDeltaT(),
+                        frames.size(),
+                        sequenceIso);
                 lastDebevecDiagnosticsSummary = String.format(Locale.US,
                         "g(DN) 已保存，R²_lnΔt = %.3f",
                         result.getRSquaredLogDeltaT());
-                view.showToast(String.format(Locale.US,
-                        "Debevec g(DN) 已保存（校验 R²_lnΔt = %.3f）",
+                view.showToastLong(String.format(Locale.US,
+                        "Debevec g(DN) 已保存（R²_lnΔt = %.3f）。未完成此提示则说明未写入本机。",
                         result.getRSquaredLogDeltaT()));
                 view.updateCalibrationStatus(String.format(Locale.US,
                         "Debevec g(DN) 已保存，R²_lnΔt=%.3f；可用亮度计或传感器估算(L3)做绝对标定",
@@ -1114,9 +1227,17 @@ public class CameraPresenter implements CameraContract.Presenter {
                 view.onDebevecGSaved();
             } catch (Exception e) {
                 String msg = e.getMessage();
-                view.showToast(msg != null ? msg : "Debevec 解算失败");
+                String hint = msg != null ? msg : "Debevec 解算失败";
+                lastDebevecSolveFailureHint = hint;
+                view.showToastLong(hint + "（曲线未保存）");
             }
         });
+    }
+
+    /** 供绝对标定入口解释「已拍序列但无 g」；无失败记录时返回空串。 */
+    public String getLastDebevecSolveFailureHint() {
+        String s = lastDebevecSolveFailureHint;
+        return s != null ? s : "";
     }
 
     /**

@@ -71,7 +71,11 @@ class ExposureSequenceCapture(
 ) {
     private val mainExecutor = ContextCompat.getMainExecutor(context)
     private val supervisorJob = SupervisorJob()
-    private val scope = CoroutineScope(supervisorJob + Dispatchers.Main.immediate)
+    /**
+     * 曝光序列必须在后台调度器上运行：原先使用 [Dispatchers.Main.immediate] 时，
+     * [applyExposureWithRetries] 内的 [Thread.sleep] 会阻塞主线程，导致预览黑屏与 ANR。
+     */
+    private val scope = CoroutineScope(supervisorJob + Dispatchers.Default)
 
     private val stateRef = AtomicReference(SequenceState.IDLE)
     private var sequenceJob: Job? = null
@@ -173,7 +177,7 @@ class ExposureSequenceCapture(
     private suspend fun runSequenceInternal(config: SequenceConfig, callback: CaptureCallback) {
         require(config.exposureTimes.isNotEmpty()) { "exposureTimes must not be empty" }
         supervisorScope {
-            lockAeAfAndIso(config.iso)
+            lockAeAfAndIsoSuspend(config.iso)
             delay(AF_LOCK_SETTLE_MS)
 
             val times = config.exposureTimes
@@ -241,7 +245,7 @@ class ExposureSequenceCapture(
         }
     }
 
-    private fun lockAeAfAndIso(iso: Int) {
+    private suspend fun lockAeAfAndIsoSuspend(iso: Int) {
         try {
             val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
             val center = factory.createPoint(0.5f, 0.5f)
@@ -255,16 +259,12 @@ class ExposureSequenceCapture(
         applyExposureWithRetries(iso, exposureRangeNs.lower.coerceAtLeast(1L))
     }
 
-    private fun applyExposureWithRetries(iso: Int, exposureNs: Long): Boolean {
+    private suspend fun applyExposureWithRetries(iso: Int, exposureNs: Long): Boolean {
         repeat(EXPOSURE_APPLY_RETRIES) { attempt ->
             if (applyManualCaptureRequest(iso, exposureNs)) {
                 return true
             }
-            try {
-                Thread.sleep(50L * (attempt + 1))
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-            }
+            delay(50L * (attempt + 1))
         }
         return false
     }
